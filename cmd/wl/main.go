@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -90,7 +91,8 @@ func main() {
 			}
 
 			// Ensure a computed "price" column exists right after "sym" if present
-			// and not already included. If no "sym" column, leave keys as-is.
+			// and not already included. Also ensure a computed "chg%" right after "price".
+			// If no "sym" column, leave keys as-is.
 			{
 				// Find sym index
 				symIdx := -1
@@ -115,11 +117,39 @@ func main() {
 						copy(keys[symIdx+2:], keys[symIdx+1:])
 						keys[symIdx+1] = "price"
 					}
+
+					// Ensure "chg%" exists right after "price"
+					priceIdx := -1
+					for i, k := range keys {
+						if k == "price" {
+							priceIdx = i
+							break
+						}
+					}
+					if priceIdx >= 0 {
+						foundChg := false
+						for _, k := range keys {
+							if k == "chg%" {
+								foundChg = true
+								break
+							}
+						}
+						if !foundChg {
+							keys = append(keys, "")
+							copy(keys[priceIdx+2:], keys[priceIdx+1:])
+							keys[priceIdx+1] = "chg%"
+						}
+					}
 				}
 			}
 
 			tw := table.NewWriter()
 			tw.SetOutputMirror(os.Stdout)
+			// Set table style and options
+			tw.SetStyle(table.StyleColoredDark)
+			tw.Style().Options.DrawBorder = false
+			tw.Style().Options.SeparateRows = false
+			tw.Style().Options.SeparateColumns = false
 			// Header
 			hdr := make(table.Row, len(keys))
 			for i, k := range keys {
@@ -127,35 +157,54 @@ func main() {
 			}
 			tw.AppendHeader(hdr)
 
-			// Prepare price fetcher with simple in-memory cache
-			priceCache := map[string]string{}
+			// Prepare quote fetcher with simple in-memory cache
+			type quoteOut struct {
+				price string
+				chgFmt string
+				chgRaw float64
+			}
+			quoteCache := map[string]quoteOut{}
 			client := yfgo.NewClient()
-			fetchPrice := func(ctx context.Context, sym string) string {
+			fetchQuote := func(ctx context.Context, sym string) quoteOut {
 				if sym == "" {
-					return ""
+					return quoteOut{}
 				}
-				if v, ok := priceCache[sym]; ok {
+				if v, ok := quoteCache[sym]; ok {
 					return v
 				}
 				ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
 				res, err := client.QuoteSummaryTyped(ctx, sym, []yfgo.QuoteSummaryModule{yfgo.ModulePrice})
 				if err != nil || res.Price == nil {
-					priceCache[sym] = ""
-					return ""
+					quoteCache[sym] = quoteOut{}
+					return quoteOut{}
 				}
 				// Prefer formatted value if available, otherwise raw
 				p := res.Price.RegularMarketPrice
-				var out string
+				var priceStr string
 				if p.Fmt != "" {
-					out = p.Fmt
+					priceStr = p.Fmt
 				} else if p.Raw != nil {
-					out = fmt.Sprintf("%.2f", *p.Raw)
+					priceStr = fmt.Sprintf("%.2f", *p.Raw)
 				} else {
-					out = ""
+					priceStr = ""
 				}
-				priceCache[sym] = out
-				return out
+				// Change percent
+				var chgFmt string
+				var chgRaw float64
+				cp := res.Price.RegularMarketChangePercent
+				if cp.Fmt != "" {
+					chgFmt = cp.Fmt
+				}
+				if cp.Raw != nil {
+					chgRaw = *cp.Raw
+					if chgFmt == "" {
+						chgFmt = fmt.Sprintf("%.2f%%", chgRaw)
+					}
+				}
+				qo := quoteOut{price: priceStr, chgFmt: chgFmt, chgRaw: chgRaw}
+				quoteCache[sym] = qo
+				return qo
 			}
 
 			// Rows
@@ -165,9 +214,21 @@ func main() {
 				if v, ok := m["sym"]; ok && v != nil {
 					symVal = fmt.Sprint(v)
 				}
+				qo := fetchQuote(context.Background(), symVal)
 				for i, k := range keys {
-					if k == "price" {
-						row[i] = fetchPrice(context.Background(), symVal)
+					if k == "price" || k == "chg%" {
+						val := ""
+						if k == "price" {
+							val = qo.price
+						} else {
+							val = qo.chgFmt
+						}
+						if qo.chgRaw > 0 {
+							val = text.Colors{text.FgGreen}.Sprintf("%s", val)
+						} else if qo.chgRaw < 0 {
+							val = text.Colors{text.FgRed}.Sprintf("%s", val)
+						}
+						row[i] = val
 						continue
 					}
 					if v, ok := m[k]; ok && v != nil {
