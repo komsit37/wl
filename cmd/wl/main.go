@@ -39,29 +39,51 @@ func main() {
 				return fmt.Errorf("read %s: %w", filename, err)
 			}
 
-			var items []map[string]any
-			if err := yaml.Unmarshal(data, &items); err != nil {
-				return fmt.Errorf("parse yaml %s: %w", filename, err)
-			}
+			// Support two YAML shapes:
+			// 1) Top-level list of items: "- sym: ..."
+			// 2) Map with optional columns and items: "columns: [...]; items: [...]"
+			var (
+				items []map[string]any
+				keys  []string
+			)
 
-			// Determine all keys across items, put "sym" first if present, then others sorted.
-			keySet := map[string]struct{}{}
-			for _, m := range items {
-				for k := range m {
-					keySet[k] = struct{}{}
+			// Try list form: top-level list of maps
+			if err := yaml.Unmarshal(data, &items); err != nil {
+				// Try map form: object with columns + items
+				var alt struct {
+					Columns []string         `yaml:"columns"`
+					Items   []map[string]any `yaml:"items"`
+				}
+				if err2 := yaml.Unmarshal(data, &alt); err2 != nil {
+					return fmt.Errorf("parse yaml %s: %w", filename, err)
+				}
+				items = alt.Items
+				// If columns provided, respect order; otherwise compute fallback below.
+				if len(alt.Columns) > 0 {
+					keys = append(keys, alt.Columns...)
 				}
 			}
-			var keys []string
-			if _, ok := keySet["sym"]; ok {
-				keys = append(keys, "sym")
-				delete(keySet, "sym")
+
+			// If keys not set yet, compute from items with sensible ordering.
+			if len(keys) == 0 {
+				// Determine all keys across items, put "sym" first if present, then others sorted.
+				keySet := map[string]struct{}{}
+				for _, m := range items {
+					for k := range m {
+						keySet[k] = struct{}{}
+					}
+				}
+				if _, ok := keySet["sym"]; ok {
+					keys = append(keys, "sym")
+					delete(keySet, "sym")
+				}
+				var rest []string
+				for k := range keySet {
+					rest = append(rest, k)
+				}
+				sort.Strings(rest)
+				keys = append(keys, rest...)
 			}
-			var rest []string
-			for k := range keySet {
-				rest = append(rest, k)
-			}
-			sort.Strings(rest)
-			keys = append(keys, rest...)
 
 			tw := table.NewWriter()
 			tw.SetOutputMirror(os.Stdout)
