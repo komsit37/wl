@@ -32,11 +32,11 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "wl <file.yaml>",
+		Use:   "wl <file|dir>",
 		Short: "Render a watchlist",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return errors.New("requires exactly 1 YAML file argument")
+				return errors.New("requires exactly 1 path argument (YAML file or directory)")
 			}
 			return nil
 		},

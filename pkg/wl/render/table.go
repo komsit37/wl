@@ -27,6 +27,11 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 	for li, list := range lists {
 		cols := list.Columns
 
+		// Print watchlist name as a standalone line spanning full width
+		if multi && strings.TrimSpace(list.Name) != "" {
+			fmt.Fprintln(w, text.Bold.Sprint(strings.ToUpper(list.Name)))
+		}
+
 		tw := table.NewWriter()
 		tw.SetOutputMirror(w)
 		tw.SetStyle(table.StyleColoredDark)
@@ -34,11 +39,6 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 		tw.Style().Options.SeparateRows = false
 		tw.Style().Options.SeparateColumns = false
 
-		// Optional watchlist name as a header row (first column bold)
-		if multi && list.Name != "" {
-			nameCell := text.Bold.Sprint(strings.ToUpper(list.Name))
-			tw.AppendHeader(table.Row{nameCell})
-		}
 		// Column header row
 		hdr := make(table.Row, len(cols))
 		for i, c := range cols {

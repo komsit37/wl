@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -21,6 +23,68 @@ func (YAMLSource) Load(ctx context.Context, spec any) ([]types.Watchlist, error)
 	if !ok {
 		return nil, fmt.Errorf("yaml source expects filepath string spec")
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if info.IsDir() {
+		// Recursively load all YAML files in the directory and combine.
+		var files []string
+		err := filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(d.Name()))
+			if ext == ".yaml" || ext == ".yml" {
+				files = append(files, p)
+			}
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(files)
+
+		var all []types.Watchlist
+		for _, full := range files {
+			f, err := os.Open(full)
+			if err != nil {
+				return nil, err
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			lists, err := parseYAML(data)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", full, err)
+			}
+			// Compute prefix from relative path (without extension), using forward slashes.
+			rel, err := filepath.Rel(path, full)
+			if err != nil {
+				rel = filepath.Base(full)
+			}
+			ext := filepath.Ext(rel)
+			prefix := strings.TrimSuffix(rel, ext)
+			prefix = filepath.ToSlash(prefix)
+			for i := range lists {
+				if strings.TrimSpace(lists[i].Name) == "" {
+					lists[i].Name = prefix
+				} else if prefix != "" {
+					lists[i].Name = prefix + "/" + lists[i].Name
+				}
+			}
+			all = append(all, lists...)
+		}
+		return all, nil
+	}
+
+	// Single file
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -30,7 +94,18 @@ func (YAMLSource) Load(ctx context.Context, spec any) ([]types.Watchlist, error)
 	if err != nil {
 		return nil, err
 	}
-	return parseYAML(data)
+	lists, err := parseYAML(data)
+	if err != nil {
+		return nil, err
+	}
+	// If a list has no name, use the file name as a fallback.
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	for i := range lists {
+		if strings.TrimSpace(lists[i].Name) == "" {
+			lists[i].Name = base
+		}
+	}
+	return lists, nil
 }
 
 // parseYAML parses the repo's YAML format into multiple watchlists.
