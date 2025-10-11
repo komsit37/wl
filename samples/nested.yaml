@@ -1,0 +1,22 @@
+watchlist:
+  - name: core
+    watchlist:
+      - sym: 7203.T
+        note: core
+        good: profitable biz
+      - sym: 1813.T
+      - sym: 7292.T
+
+  - name: watchlist
+    watchlist:
+      - name: tech
+        watchlist:
+          - sym: 6758.T
+            note: Sony
+          - sym: 6954.T
+            note: Fanuc
+      - name: food
+        watchlist:
+          - sym: 2802.T
+            note: Ajinomoto
+

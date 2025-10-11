@@ -1,0 +1,8 @@
+columns: [sym, note, good]
+watchlist:
+  - sym: 7203.T
+    note: core
+    good: profitable biz
+  - sym: 1813.T
+  - sym: 7292.T
+

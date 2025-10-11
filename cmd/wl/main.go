@@ -92,22 +92,118 @@ func (q *QuoteFetcher) Fetch(ctx context.Context, sym string) quoteOut {
 	return qo
 }
 
-// parseWatchlistYAML supports two YAML shapes:
+// parseWatchlistYAML supports flexible YAML shapes:
 // 1) Top-level list of items: "- sym: ..."
-// 2) Map with optional columns and items: "columns: [...]; items: [...]"
+// 2) Map with optional columns and watchlist: "columns: [...]; watchlist: [...]"
+// 3) Nested groups via "name" + "watchlist" inside lists. Backward compatible with "items" key.
 func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, err error) {
-	if err := yaml.Unmarshal(data, &items); err == nil {
-		return items, nil, nil
+	var root any
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return nil, nil, err
 	}
 
-	var alt struct {
-		Columns []string         `yaml:"columns"`
-		Items   []map[string]any `yaml:"items"`
+	// Helper: convert any slice to []string
+	toStringSlice := func(v any) []string {
+		if v == nil {
+			return nil
+		}
+		switch s := v.(type) {
+		case []string:
+			return s
+		case []any:
+			out := make([]string, 0, len(s))
+			for _, e := range s {
+				if e == nil {
+					continue
+				}
+				out = append(out, fmt.Sprint(e))
+			}
+			return out
+		default:
+			return nil
+		}
 	}
-	if err2 := yaml.Unmarshal(data, &alt); err2 != nil {
-		return nil, nil, err2
+
+	// Helper: flatten nodes that can be either leaf items or groups with nested watchlists.
+	var flatten func(n any, acc *[]map[string]any)
+	flatten = func(n any, acc *[]map[string]any) {
+		if n == nil {
+			return
+		}
+		switch v := n.(type) {
+		case []any:
+			for _, e := range v {
+				flatten(e, acc)
+			}
+		case map[string]any:
+			// Group if it contains a nested list under "watchlist" or legacy "items".
+			if wl, ok := v["watchlist"]; ok && wl != nil {
+				flatten(wl, acc)
+				return
+			}
+			if it, ok := v["items"]; ok && it != nil { // backward compatibility
+				flatten(it, acc)
+				return
+			}
+			// Treat as a leaf item.
+			*acc = append(*acc, v)
+		case map[any]any:
+			// Convert to map[string]any if keys are strings.
+			m := make(map[string]any, len(v))
+			for k, val := range v {
+				m[fmt.Sprint(k)] = val
+			}
+			flatten(m, acc)
+		default:
+			// Ignore scalars at top-level
+		}
 	}
-	return alt.Items, alt.Columns, nil
+
+	switch r := root.(type) {
+	case []any:
+		flatten(r, &items)
+		return items, nil, nil
+	case map[string]any:
+		// Extract optional columns
+		columns = toStringSlice(r["columns"])
+		// Prefer new key "watchlist"; support legacy "items".
+		var list any
+		if wl, ok := r["watchlist"]; ok {
+			list = wl
+		} else if it, ok := r["items"]; ok { // backward compatibility
+			list = it
+		}
+		if list == nil {
+			// No list found; treat top-level map as single item
+			// (unlikely for this tool, but keeps behavior predictable)
+			flatten(r, &items)
+			return items, columns, nil
+		}
+		flatten(list, &items)
+		return items, columns, nil
+	case map[any]any:
+		// Convert and recurse
+		m := make(map[string]any, len(r))
+		for k, v := range r {
+			m[fmt.Sprint(k)] = v
+		}
+		// Re-run the map[string]any branch
+		columns = toStringSlice(m["columns"])
+		var list any
+		if wl, ok := m["watchlist"]; ok {
+			list = wl
+		} else if it, ok := m["items"]; ok {
+			list = it
+		}
+		if list == nil {
+			flatten(m, &items)
+			return items, columns, nil
+		}
+		flatten(list, &items)
+		return items, columns, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported YAML root type: %T", root)
+	}
 }
 
 // computeColumns determines the final column order. If explicit is provided,
@@ -306,6 +402,7 @@ func main() {
 				return fmt.Errorf("open %s: %w", filename, err)
 			}
 			defer f.Close()
+			cmd.SilenceUsage = true
 
 			data, err := io.ReadAll(f)
 			if err != nil {
