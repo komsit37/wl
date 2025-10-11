@@ -18,15 +18,6 @@ import (
 	yfgo "github.com/komsit37/yf-go"
 )
 
-// truncateRunes trims a string to at most n runes.
-func truncateRunes(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n])
-}
-
 // quoteOut holds formatted and raw quote values for rendering.
 type quoteOut struct {
 	price  string
@@ -234,6 +225,19 @@ func renderTable(w io.Writer, items []map[string]any, keys []string, fetcher *Qu
 	}
 	tw.AppendHeader(hdr)
 
+	// Column-specific configs (use header names)
+	nameTransformer := text.Transformer(func(val interface{}) string {
+		s := fmt.Sprint(val)
+		r := []rune(s)
+		if len(r) <= 10 {
+			return s
+		}
+		return string(r[:10])
+	})
+	tw.SetColumnConfigs([]table.ColumnConfig{
+		{Name: "NAME", WidthMax: 10, Align: text.AlignLeft, Transformer: nameTransformer},
+	})
+
 	// Rows
 	for _, m := range items {
 		row := make(table.Row, len(keys))
@@ -263,14 +267,14 @@ func renderTable(w io.Writer, items []map[string]any, keys []string, fetcher *Qu
 				row[i] = val
 				continue
 			case "name":
-				// Prefer YAML-provided name, else fetched; truncate to 10 runes.
+				// Prefer YAML-provided name, else fetched
 				var name string
 				if v, ok := m["name"]; ok && v != nil {
 					name = fmt.Sprint(v)
 				} else {
 					name = qo.name
 				}
-				row[i] = truncateRunes(name, 10)
+				row[i] = name
 				continue
 			}
 			if v, ok := m[k]; ok && v != nil {
