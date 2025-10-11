@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/jedib0t/go-pretty/v6/list"
 
 	"github.com/komsit37/wl/pkg/wl/columns"
 	"github.com/komsit37/wl/pkg/wl/enrich"
@@ -29,6 +32,7 @@ func main() {
 		flagCacheTTL    time.Duration
 		flagCacheSize   int
 		flagConcurrency int
+		flagList        bool
 	)
 
 	rootCmd := &cobra.Command{
@@ -79,6 +83,77 @@ func main() {
 				return fmt.Errorf("invalid filter: %w", err)
 			}
 
+			// List mode: list watchlist names using go-pretty list with hierarchy
+			if flagList {
+				lists, err := src.Load(cmd.Context(), spec)
+				if err != nil {
+					return err
+				}
+				var filt filter.Filter = filter.Always(true)
+				if f != nil {
+					filt = f
+				}
+				// Build a tree from filtered watchlist names split by '/'
+				type node struct {
+					children map[string]*node
+					terminal bool
+				}
+				root := &node{children: map[string]*node{}}
+				addPath := func(parts []string) {
+					cur := root
+					for i, p := range parts {
+						if strings.TrimSpace(p) == "" {
+							continue
+						}
+						if cur.children == nil {
+							cur.children = map[string]*node{}
+						}
+						child, ok := cur.children[p]
+						if !ok {
+							child = &node{children: map[string]*node{}}
+							cur.children[p] = child
+						}
+						cur = child
+						if i == len(parts)-1 {
+							cur.terminal = true
+						}
+					}
+				}
+				for _, wl := range lists {
+					if filt.Match(wl.Name) {
+						parts := strings.Split(wl.Name, "/")
+						addPath(parts)
+					}
+				}
+				// Render the tree using go-pretty with connected rounded style
+				lw := list.NewWriter()
+				lw.SetStyle(list.StyleConnectedLight)
+				lw.SetOutputMirror(os.Stdout)
+				var walk func(prefix []string, n *node)
+				walk = func(prefix []string, n *node) {
+					// sort children for stable output
+					keys := make([]string, 0, len(n.children))
+					for k := range n.children {
+						keys = append(keys, k)
+					}
+					sort.Strings(keys)
+					for i, k := range keys {
+						_ = i // order already set by sort
+						lw.AppendItem(strings.ToUpper(k))
+						child := n.children[k]
+						if len(child.children) > 0 {
+							lw.Indent()
+							walk(append(prefix, k), child)
+							lw.UnIndent()
+						}
+					}
+				}
+				walk(nil, root)
+				_ = list.List{} // ensure package object referenced (example parity)
+				_ = lw.Render()
+				return nil
+			}
+
 			// Columns
 			var cols []string
 			if strings.TrimSpace(flagColumns) != "" {
@@ -120,6 +195,7 @@ func main() {
 	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
 	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
 	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
+	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
