@@ -1,372 +1,39 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/jedib0t/go-pretty/v6/table"
-	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 
-	yfgo "github.com/komsit37/yf-go"
+	"github.com/komsit37/wl/pkg/wl/columns"
+	"github.com/komsit37/wl/pkg/wl/enrich"
+	"github.com/komsit37/wl/pkg/wl/filter"
+	"github.com/komsit37/wl/pkg/wl/pipeline"
+	"github.com/komsit37/wl/pkg/wl/render"
+	"github.com/komsit37/wl/pkg/wl/source"
 )
 
-// quoteOut holds formatted and raw quote values for rendering.
-type quoteOut struct {
-	price  string
-	chgFmt string
-	chgRaw float64
-	name   string
-}
-
-// QuoteFetcher fetches quotes with a small in-memory cache.
-type QuoteFetcher struct {
-	client  *yfgo.Client
-	cache   map[string]quoteOut
-	timeout time.Duration
-}
-
-func NewQuoteFetcher(timeout time.Duration) *QuoteFetcher {
-	return &QuoteFetcher{
-		client:  yfgo.NewClient(),
-		cache:   make(map[string]quoteOut),
-		timeout: timeout,
-	}
-}
-
-func (q *QuoteFetcher) Fetch(ctx context.Context, sym string) quoteOut {
-	if sym == "" {
-		return quoteOut{}
-	}
-	if v, ok := q.cache[sym]; ok {
-		return v
-	}
-	ctx, cancel := context.WithTimeout(ctx, q.timeout)
-	defer cancel()
-	res, err := q.client.QuoteSummaryTyped(ctx, sym, []yfgo.QuoteSummaryModule{yfgo.ModulePrice})
-	if err != nil || res.Price == nil {
-		q.cache[sym] = quoteOut{}
-		return quoteOut{}
-	}
-
-	// Price
-	p := res.Price.RegularMarketPrice
-	var priceStr string
-	if p.Fmt != "" {
-		priceStr = p.Fmt
-	} else if p.Raw != nil {
-		priceStr = fmt.Sprintf("%.2f", *p.Raw)
-	}
-
-	// Change percent
-	var chgFmt string
-	var chgRaw float64
-	cp := res.Price.RegularMarketChangePercent
-	if cp.Fmt != "" {
-		chgFmt = cp.Fmt
-	}
-	if cp.Raw != nil {
-		chgRaw = *cp.Raw
-		if chgFmt == "" {
-			chgFmt = fmt.Sprintf("%.2f%%", chgRaw)
-		}
-	}
-
-	// Name (prefer ShortName, fallback to LongName if available)
-	var name string
-	if res.Price.ShortName != "" {
-		name = res.Price.ShortName
-	} else if res.Price.LongName != "" {
-		name = res.Price.LongName
-	}
-
-	qo := quoteOut{price: priceStr, chgFmt: chgFmt, chgRaw: chgRaw, name: name}
-	q.cache[sym] = qo
-	return qo
-}
-
-// parseWatchlistYAML supports a single, simplified YAML shape:
-// - Map with optional columns and required watchlist: "columns: [...]; watchlist: [...]"
-// - Nested groups via "name" + "watchlist" inside lists.
-// Legacy formats (top-level list, or top-level "items") are no longer supported.
-func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, err error) {
-	var root any
-	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, nil, err
-	}
-
-	// Helper: convert any slice to []string
-	toStringSlice := func(v any) []string {
-		if v == nil {
-			return nil
-		}
-		switch s := v.(type) {
-		case []string:
-			return s
-		case []any:
-			out := make([]string, 0, len(s))
-			for _, e := range s {
-				if e == nil {
-					continue
-				}
-				out = append(out, fmt.Sprint(e))
-			}
-			return out
-		default:
-			return nil
-		}
-	}
-
-	// Helper: flatten nodes that can be either leaf items or groups with nested watchlists.
-	var flatten func(n any, acc *[]map[string]any)
-	flatten = func(n any, acc *[]map[string]any) {
-		if n == nil {
-			return
-		}
-		switch v := n.(type) {
-		case []any:
-			for _, e := range v {
-				flatten(e, acc)
-			}
-		case map[string]any:
-			// Group if it contains a nested list under "watchlist".
-			if wl, ok := v["watchlist"]; ok && wl != nil {
-				flatten(wl, acc)
-				return
-			}
-			// Treat as a leaf item.
-			*acc = append(*acc, v)
-		case map[any]any:
-			// Convert to map[string]any if keys are strings.
-			m := make(map[string]any, len(v))
-			for k, val := range v {
-				m[fmt.Sprint(k)] = val
-			}
-			flatten(m, acc)
-		default:
-			// Ignore scalars at top-level
-		}
-	}
-
-	switch r := root.(type) {
-	case map[string]any:
-		// Extract optional columns
-		columns = toStringSlice(r["columns"])
-		wl, ok := r["watchlist"]
-		if !ok || wl == nil {
-			return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
-		}
-		flatten(wl, &items)
-		return items, columns, nil
-	case map[any]any:
-		// Convert and recurse
-		m := make(map[string]any, len(r))
-		for k, v := range r {
-			m[fmt.Sprint(k)] = v
-		}
-		// Re-run the map[string]any branch
-		columns = toStringSlice(m["columns"])
-		wl, ok := m["watchlist"]
-		if !ok || wl == nil {
-			return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
-		}
-		flatten(wl, &items)
-		return items, columns, nil
-	default:
-		return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
-	}
-}
-
-// computeColumns determines the final column order. If explicit is provided,
-// it is respected; otherwise keys are discovered across items, preferring
-// "sym" first then sorted remainder. Ensures "name" then "price" then "chg%"
-// after "sym" when "sym" exists.
-func computeColumns(items []map[string]any, explicit []string) []string {
-	keys := make([]string, 0, 8)
-	if len(explicit) > 0 {
-		keys = append(keys, explicit...)
-	} else {
-		keySet := map[string]struct{}{}
-		for _, m := range items {
-			for k := range m {
-				keySet[k] = struct{}{}
-			}
-		}
-		if _, ok := keySet["sym"]; ok {
-			keys = append(keys, "sym")
-			delete(keySet, "sym")
-		}
-		var rest []string
-		for k := range keySet {
-			rest = append(rest, k)
-		}
-		sort.Strings(rest)
-		keys = append(keys, rest...)
-	}
-
-	// Ensure computed columns when sym exists.
-	symIdx := -1
-	for i, k := range keys {
-		if k == "sym" {
-			symIdx = i
-			break
-		}
-	}
-	if symIdx >= 0 {
-		// Ensure name right after sym.
-		hasName := false
-		for _, k := range keys {
-			if k == "name" {
-				hasName = true
-				break
-			}
-		}
-		if !hasName {
-			keys = append(keys, "")
-			copy(keys[symIdx+2:], keys[symIdx+1:])
-			keys[symIdx+1] = "name"
-		}
-
-		// Ensure price right after name (or sym if name absent originally).
-		hasPrice := false
-		for _, k := range keys {
-			if k == "price" {
-				hasPrice = true
-				break
-			}
-		}
-		if !hasPrice {
-			insertAfter := symIdx
-			for i, k := range keys {
-				if k == "name" {
-					insertAfter = i
-					break
-				}
-			}
-			keys = append(keys, "")
-			copy(keys[insertAfter+2:], keys[insertAfter+1:])
-			keys[insertAfter+1] = "price"
-		}
-
-		// Ensure chg% after price.
-		priceIdx := -1
-		for i, k := range keys {
-			if k == "price" {
-				priceIdx = i
-				break
-			}
-		}
-		if priceIdx >= 0 {
-			hasChg := false
-			for _, k := range keys {
-				if k == "chg%" {
-					hasChg = true
-					break
-				}
-			}
-			if !hasChg {
-				keys = append(keys, "")
-				copy(keys[priceIdx+2:], keys[priceIdx+1:])
-				keys[priceIdx+1] = "chg%"
-			}
-		}
-	}
-
-	return keys
-}
-
-// renderTable builds and renders the table to the provided writer.
-func renderTable(w io.Writer, items []map[string]any, keys []string, fetcher *QuoteFetcher) {
-	tw := table.NewWriter()
-	tw.SetOutputMirror(w)
-	// Set table style and options
-	tw.SetStyle(table.StyleColoredDark)
-	tw.Style().Options.DrawBorder = false
-	tw.Style().Options.SeparateRows = false
-	tw.Style().Options.SeparateColumns = false
-
-	// Header
-	hdr := make(table.Row, len(keys))
-	for i, k := range keys {
-		hdr[i] = strings.ToUpper(k)
-	}
-	tw.AppendHeader(hdr)
-
-	// Column-specific configs (use header names)
-	nameTransformer := text.Transformer(func(val interface{}) string {
-		s := fmt.Sprint(val)
-		r := []rune(s)
-		if len(r) <= 10 {
-			return s
-		}
-		return string(r[:10])
-	})
-	tw.SetColumnConfigs([]table.ColumnConfig{
-		{Name: "NAME", WidthMax: 10, Align: text.AlignLeft, Transformer: nameTransformer},
-	})
-
-	// Rows
-	for _, m := range items {
-		row := make(table.Row, len(keys))
-		var symVal string
-		if v, ok := m["sym"]; ok && v != nil {
-			symVal = fmt.Sprint(v)
-		}
-		qo := fetcher.Fetch(context.Background(), symVal)
-		for i, k := range keys {
-			switch k {
-			case "price":
-				val := qo.price
-				if qo.chgRaw > 0 {
-					val = text.Colors{text.FgGreen}.Sprintf("%s", val)
-				} else if qo.chgRaw < 0 {
-					val = text.Colors{text.FgRed}.Sprintf("%s", val)
-				}
-				row[i] = val
-				continue
-			case "chg%":
-				val := qo.chgFmt
-				if qo.chgRaw > 0 {
-					val = text.Colors{text.FgGreen}.Sprintf("%s", val)
-				} else if qo.chgRaw < 0 {
-					val = text.Colors{text.FgRed}.Sprintf("%s", val)
-				}
-				row[i] = val
-				continue
-			case "name":
-				// Prefer YAML-provided name, else fetched
-				var name string
-				if v, ok := m["name"]; ok && v != nil {
-					name = fmt.Sprint(v)
-				} else {
-					name = qo.name
-				}
-				row[i] = name
-				continue
-			}
-			if v, ok := m[k]; ok && v != nil {
-				row[i] = fmt.Sprint(v)
-			} else {
-				row[i] = ""
-			}
-		}
-		tw.AppendRow(row)
-	}
-
-	tw.Render()
-}
-
 func main() {
+	var (
+		flagSource      string
+		flagDBDSN       string
+		flagOutput      string
+		flagNoColor     bool
+		flagPrettyJSON  bool
+		flagColumns     string
+		flagFilter      string
+		flagCacheTTL    time.Duration
+		flagCacheSize   int
+		flagConcurrency int
+	)
+
 	rootCmd := &cobra.Command{
 		Use:   "wl <file.yaml>",
-		Short: "Render a YAML watchlist to a table",
+		Short: "Render a watchlist",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return errors.New("requires exactly 1 YAML file argument")
@@ -374,29 +41,85 @@ func main() {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filename := args[0]
-			f, err := os.Open(filename)
-			if err != nil {
-				return fmt.Errorf("open %s: %w", filename, err)
-			}
-			defer f.Close()
 			cmd.SilenceUsage = true
-
-			data, err := io.ReadAll(f)
-			if err != nil {
-				return fmt.Errorf("read %s: %w", filename, err)
+			// Source
+			var src source.Source
+			spec := any(nil)
+			switch flagSource {
+			case "yaml", "":
+				src = source.YAMLSource{}
+				spec = args[0]
+			case "db":
+				return fmt.Errorf("db source not implemented: dsn=%s", flagDBDSN)
+			default:
+				return fmt.Errorf("unknown source: %s", flagSource)
 			}
-			items, explicitCols, err := parseWatchlistYAML(data)
-			if err != nil {
-				return fmt.Errorf("parse yaml %s: %w", filename, err)
+
+			// Quotes service with cache
+			qs := enrich.NewYFService(5 * time.Second)
+			if flagCacheTTL > 0 && flagCacheSize <= 0 {
+				flagCacheSize = 1000
 			}
 
-			cols := computeColumns(items, explicitCols)
-			fetcher := NewQuoteFetcher(5 * time.Second)
-			renderTable(os.Stdout, items, cols, fetcher)
-			return nil
+			// Renderer
+			var rnd render.Renderer
+			services := columns.Services{Quotes: qs}
+			switch flagOutput {
+			case "table", "":
+				rnd = render.NewTableRenderer(services)
+			case "json":
+				rnd = render.NewJSONRenderer()
+			default:
+				return fmt.Errorf("unknown output: %s", flagOutput)
+			}
+
+			// Filter
+			f, err := filter.Parse(flagFilter)
+			if err != nil {
+				return fmt.Errorf("invalid filter: %w", err)
+			}
+
+			// Columns
+			var cols []string
+			if strings.TrimSpace(flagColumns) != "" {
+				parts := strings.Split(flagColumns, ",")
+				for _, p := range parts {
+					p = strings.TrimSpace(p)
+					if p != "" {
+						cols = append(cols, p)
+					}
+				}
+			}
+
+			// Runner
+			run := &pipeline.Runner{
+				Source:   src,
+				Quotes:   qs,
+				Renderer: rnd,
+				Writer:   os.Stdout,
+			}
+			return run.Execute(cmd.Context(), spec, pipeline.ExecuteOptions{
+				Columns:        cols,
+				Filter:         f,
+				PriceCacheTTL:  flagCacheTTL,
+				PriceCacheSize: flagCacheSize,
+				Concurrency:    flagConcurrency,
+				Color:          !flagNoColor,
+				PrettyJSON:     flagPrettyJSON,
+			})
 		},
 	}
+
+	rootCmd.Flags().StringVar(&flagSource, "source", "yaml", "data source: yaml|db")
+	rootCmd.Flags().StringVar(&flagDBDSN, "db-dsn", "", "database DSN for db source")
+	rootCmd.Flags().StringVar(&flagOutput, "output", "table", "output format: table|json")
+	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
+	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
+	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
+	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: name[,name...]|glob|/regex/")
+	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
+	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
+	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)

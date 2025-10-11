@@ -18,3 +18,5 @@ coverage.out
 .tmp/
 *.log
 
+.gocache/
+.gopath/
