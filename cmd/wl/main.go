@@ -92,10 +92,10 @@ func (q *QuoteFetcher) Fetch(ctx context.Context, sym string) quoteOut {
 	return qo
 }
 
-// parseWatchlistYAML supports flexible YAML shapes:
-// 1) Top-level list of items: "- sym: ..."
-// 2) Map with optional columns and watchlist: "columns: [...]; watchlist: [...]"
-// 3) Nested groups via "name" + "watchlist" inside lists. Backward compatible with "items" key.
+// parseWatchlistYAML supports a single, simplified YAML shape:
+// - Map with optional columns and required watchlist: "columns: [...]; watchlist: [...]"
+// - Nested groups via "name" + "watchlist" inside lists.
+// Legacy formats (top-level list, or top-level "items") are no longer supported.
 func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, err error) {
 	var root any
 	if err := yaml.Unmarshal(data, &root); err != nil {
@@ -136,13 +136,9 @@ func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, 
 				flatten(e, acc)
 			}
 		case map[string]any:
-			// Group if it contains a nested list under "watchlist" or legacy "items".
+			// Group if it contains a nested list under "watchlist".
 			if wl, ok := v["watchlist"]; ok && wl != nil {
 				flatten(wl, acc)
-				return
-			}
-			if it, ok := v["items"]; ok && it != nil { // backward compatibility
-				flatten(it, acc)
 				return
 			}
 			// Treat as a leaf item.
@@ -160,26 +156,14 @@ func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, 
 	}
 
 	switch r := root.(type) {
-	case []any:
-		flatten(r, &items)
-		return items, nil, nil
 	case map[string]any:
 		// Extract optional columns
 		columns = toStringSlice(r["columns"])
-		// Prefer new key "watchlist"; support legacy "items".
-		var list any
-		if wl, ok := r["watchlist"]; ok {
-			list = wl
-		} else if it, ok := r["items"]; ok { // backward compatibility
-			list = it
+		wl, ok := r["watchlist"]
+		if !ok || wl == nil {
+			return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
 		}
-		if list == nil {
-			// No list found; treat top-level map as single item
-			// (unlikely for this tool, but keeps behavior predictable)
-			flatten(r, &items)
-			return items, columns, nil
-		}
-		flatten(list, &items)
+		flatten(wl, &items)
 		return items, columns, nil
 	case map[any]any:
 		// Convert and recurse
@@ -189,20 +173,14 @@ func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, 
 		}
 		// Re-run the map[string]any branch
 		columns = toStringSlice(m["columns"])
-		var list any
-		if wl, ok := m["watchlist"]; ok {
-			list = wl
-		} else if it, ok := m["items"]; ok {
-			list = it
+		wl, ok := m["watchlist"]
+		if !ok || wl == nil {
+			return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
 		}
-		if list == nil {
-			flatten(m, &items)
-			return items, columns, nil
-		}
-		flatten(list, &items)
+		flatten(wl, &items)
 		return items, columns, nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported YAML root type: %T", root)
+		return nil, nil, fmt.Errorf("invalid yaml: expected map with 'watchlist' key")
 	}
 }
 
