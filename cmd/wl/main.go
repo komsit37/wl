@@ -18,11 +18,21 @@ import (
 	yfgo "github.com/komsit37/yf-go"
 )
 
+// truncateRunes trims a string to at most n runes.
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
 // quoteOut holds formatted and raw quote values for rendering.
 type quoteOut struct {
 	price  string
 	chgFmt string
 	chgRaw float64
+	name   string
 }
 
 // QuoteFetcher fetches quotes with a small in-memory cache.
@@ -78,7 +88,15 @@ func (q *QuoteFetcher) Fetch(ctx context.Context, sym string) quoteOut {
 		}
 	}
 
-	qo := quoteOut{price: priceStr, chgFmt: chgFmt, chgRaw: chgRaw}
+	// Name (prefer ShortName, fallback to LongName if available)
+	var name string
+	if res.Price.ShortName != "" {
+		name = res.Price.ShortName
+	} else if res.Price.LongName != "" {
+		name = res.Price.LongName
+	}
+
+	qo := quoteOut{price: priceStr, chgFmt: chgFmt, chgRaw: chgRaw, name: name}
 	q.cache[sym] = qo
 	return qo
 }
@@ -103,8 +121,8 @@ func parseWatchlistYAML(data []byte) (items []map[string]any, columns []string, 
 
 // computeColumns determines the final column order. If explicit is provided,
 // it is respected; otherwise keys are discovered across items, preferring
-// "sym" first then sorted remainder. Ensures "price" after "sym" and "chg%"
-// after "price" when "sym" exists.
+// "sym" first then sorted remainder. Ensures "name" then "price" then "chg%"
+// after "sym" when "sym" exists.
 func computeColumns(items []map[string]any, explicit []string) []string {
 	keys := make([]string, 0, 8)
 	if len(explicit) > 0 {
@@ -137,7 +155,21 @@ func computeColumns(items []map[string]any, explicit []string) []string {
 		}
 	}
 	if symIdx >= 0 {
-		// Insert price if missing right after sym.
+		// Ensure name right after sym.
+		hasName := false
+		for _, k := range keys {
+			if k == "name" {
+				hasName = true
+				break
+			}
+		}
+		if !hasName {
+			keys = append(keys, "")
+			copy(keys[symIdx+2:], keys[symIdx+1:])
+			keys[symIdx+1] = "name"
+		}
+
+		// Ensure price right after name (or sym if name absent originally).
 		hasPrice := false
 		for _, k := range keys {
 			if k == "price" {
@@ -146,9 +178,16 @@ func computeColumns(items []map[string]any, explicit []string) []string {
 			}
 		}
 		if !hasPrice {
+			insertAfter := symIdx
+			for i, k := range keys {
+				if k == "name" {
+					insertAfter = i
+					break
+				}
+			}
 			keys = append(keys, "")
-			copy(keys[symIdx+2:], keys[symIdx+1:])
-			keys[symIdx+1] = "price"
+			copy(keys[insertAfter+2:], keys[insertAfter+1:])
+			keys[insertAfter+1] = "price"
 		}
 
 		// Ensure chg% after price.
@@ -204,19 +243,34 @@ func renderTable(w io.Writer, items []map[string]any, keys []string, fetcher *Qu
 		}
 		qo := fetcher.Fetch(context.Background(), symVal)
 		for i, k := range keys {
-			if k == "price" || k == "chg%" {
-				val := ""
-				if k == "price" {
-					val = qo.price
-				} else {
-					val = qo.chgFmt
-				}
+			switch k {
+			case "price":
+				val := qo.price
 				if qo.chgRaw > 0 {
 					val = text.Colors{text.FgGreen}.Sprintf("%s", val)
 				} else if qo.chgRaw < 0 {
 					val = text.Colors{text.FgRed}.Sprintf("%s", val)
 				}
 				row[i] = val
+				continue
+			case "chg%":
+				val := qo.chgFmt
+				if qo.chgRaw > 0 {
+					val = text.Colors{text.FgGreen}.Sprintf("%s", val)
+				} else if qo.chgRaw < 0 {
+					val = text.Colors{text.FgRed}.Sprintf("%s", val)
+				}
+				row[i] = val
+				continue
+			case "name":
+				// Prefer YAML-provided name, else fetched; truncate to 10 runes.
+				var name string
+				if v, ok := m["name"]; ok && v != nil {
+					name = fmt.Sprint(v)
+				} else {
+					name = qo.name
+				}
+				row[i] = truncateRunes(name, 10)
 				continue
 			}
 			if v, ok := m[k]; ok && v != nil {
