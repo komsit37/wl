@@ -58,65 +58,78 @@ func init() {
 // Ordering rules: sym -> name -> price -> chg% when sym exists, else
 // discover across items, sym first then sorted remainder.
 func Compute(explicit []string, items []types.Item) []string {
-	keys := make([]string, 0, 8)
-	if len(explicit) > 0 {
-		keys = append(keys, explicit...)
-	} else {
-		set := map[string]struct{}{}
-		for _, it := range items {
-			for k := range it.Fields {
-				set[k] = struct{}{}
-			}
-			if it.Sym != "" {
-				set["sym"] = struct{}{}
-			}
-			if it.Name != "" {
-				set["name"] = struct{}{}
-			}
-		}
-		if _, ok := set["sym"]; ok {
-			keys = append(keys, "sym")
-			delete(set, "sym")
-		}
-		var rest []string
-		for k := range set {
-			rest = append(rest, k)
-		}
-		sort.Strings(rest)
-		keys = append(keys, rest...)
-	}
+    // If columns are explicitly provided (via CLI or YAML), honor them exactly.
+    if len(explicit) > 0 {
+        // Preserve order and do not auto-append defaults.
+        // Optionally dedupe while keeping first occurrence.
+        seen := map[string]struct{}{}
+        out := make([]string, 0, len(explicit))
+        for _, k := range explicit {
+            if _, ok := seen[k]; ok {
+                continue
+            }
+            seen[k] = struct{}{}
+            out = append(out, k)
+        }
+        return out
+    }
 
-	// Ensure name/price/chg% after sym
-	symIdx := -1
-	for i, k := range keys {
-		if k == "sym" {
-			symIdx = i
-			break
-		}
-	}
-	if symIdx >= 0 {
-		// ensure name
-		if !contains(keys, "name") {
-			keys = insertAfter(keys, symIdx, "name")
-		}
-		// ensure price after name (or sym if name absent earlier)
-		insertAfterIdx := symIdx
-		for i, k := range keys {
-			if k == "name" {
-				insertAfterIdx = i
-				break
-			}
-		}
-		if !contains(keys, "price") {
-			keys = insertAfter(keys, insertAfterIdx, "price")
-		}
-		// ensure chg% after price
-		priceIdx := indexOf(keys, "price")
-		if priceIdx >= 0 && !contains(keys, "chg%") {
-			keys = insertAfter(keys, priceIdx, "chg%")
-		}
-	}
-	return keys
+    // Otherwise infer from items with default ordering rules.
+    keys := make([]string, 0, 8)
+    set := map[string]struct{}{}
+    for _, it := range items {
+        for k := range it.Fields {
+            set[k] = struct{}{}
+        }
+        if it.Sym != "" {
+            set["sym"] = struct{}{}
+        }
+        if it.Name != "" {
+            set["name"] = struct{}{}
+        }
+    }
+    if _, ok := set["sym"]; ok {
+        keys = append(keys, "sym")
+        delete(set, "sym")
+    }
+    var rest []string
+    for k := range set {
+        rest = append(rest, k)
+    }
+    sort.Strings(rest)
+    keys = append(keys, rest...)
+
+    // Ensure name/price/chg% after sym when inferred
+    symIdx := -1
+    for i, k := range keys {
+        if k == "sym" {
+            symIdx = i
+            break
+        }
+    }
+    if symIdx >= 0 {
+        // ensure name
+        if !contains(keys, "name") {
+            keys = insertAfter(keys, symIdx, "name")
+        }
+        // ensure price after name (or sym if name absent earlier)
+        insertAfterIdx := symIdx
+        for i, k := range keys {
+            if k == "name" {
+                insertAfterIdx = i
+                break
+            }
+        }
+        if !contains(keys, "price") {
+            keys = insertAfter(keys, insertAfterIdx, "price")
+        }
+        // ensure chg% after price
+        priceIdx := indexOf(keys, "price")
+        if priceIdx >= 0 && !contains(keys, "chg%") {
+            keys = insertAfter(keys, priceIdx, "chg%")
+        }
+    }
+    return keys
 }
 
 func contains(s []string, v string) bool {
