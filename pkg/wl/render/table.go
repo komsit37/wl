@@ -46,24 +46,23 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 		}
 		tw.AppendHeader(hdr)
 
-		// Column configs: set by column index for the NAME column if present
-		nameIdx := -1
-		for i, c := range cols {
-			if c == "name" {
-				nameIdx = i + 1 // ColumnConfig.Number is 1-based
-				break
-			}
+		// Column configs: wrap text to MaxColWidth (default 40), no truncation
+		maxWidth := opts.MaxColWidth
+		if maxWidth <= 0 {
+			maxWidth = 40
 		}
-		nameTransformer := text.Transformer(func(val interface{}) string {
-			s := fmt.Sprint(val)
-			r := []rune(s)
-			if len(r) <= 10 {
-				return s
+		cfgs := make([]table.ColumnConfig, 0, len(cols))
+		for i, c := range cols {
+			cfg := table.ColumnConfig{Number: i + 1, WidthMax: maxWidth}
+			switch c {
+			case "employees", "officers_count", "avg_officer_age":
+				cfg.Align = text.AlignRight
+				cfg.AlignHeader = text.AlignRight
 			}
-			return string(r[:10])
-		})
-		if nameIdx > 0 {
-			tw.SetColumnConfigs([]table.ColumnConfig{{Number: nameIdx, WidthMax: 10, Align: text.AlignLeft, Transformer: nameTransformer}})
+			cfgs = append(cfgs, cfg)
+		}
+		if len(cfgs) > 0 {
+			tw.SetColumnConfigs(cfgs)
 		}
 
 		// Rows

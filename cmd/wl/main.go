@@ -21,58 +21,59 @@ import (
 )
 
 func main() {
-    var (
-        flagSource      string
-        flagDBDSN       string
-        flagOutput      string
-        flagNoColor     bool
-        flagPrettyJSON  bool
-        flagColumns     string
-        flagFilter      string
-        flagCacheTTL    time.Duration
-        flagCacheSize   int
-        flagConcurrency int
-        flagList        bool
-        flagListColumns bool
-    )
+	var (
+		flagSource      string
+		flagDBDSN       string
+		flagOutput      string
+		flagNoColor     bool
+		flagPrettyJSON  bool
+		flagColumns     string
+		flagFilter      string
+		flagCacheTTL    time.Duration
+		flagCacheSize   int
+		flagConcurrency int
+		flagList        bool
+		flagListColumns bool
+		flagMaxColWidth int
+	)
 
-    rootCmd := &cobra.Command{
-        Use:   "wl <file|dir>",
-        Short: "Render a watchlist",
-        Args: func(cmd *cobra.Command, args []string) error {
-            // Allow running with no args when listing columns
-            listCols, _ := cmd.Flags().GetBool("list-columns")
-            if listCols {
-                return nil
-            }
-            if len(args) != 1 {
-                return errors.New("requires exactly 1 path argument (YAML file or directory)")
-            }
-            return nil
-        },
-        RunE: func(cmd *cobra.Command, args []string) error {
-            cmd.SilenceUsage = true
-            // List available columns and exit
-            if flagListColumns {
-                keys := make([]string, 0, len(columns.Registry))
-                for k := range columns.Registry {
-                    keys = append(keys, k)
-                }
-                sort.Strings(keys)
-                lw := list.NewWriter()
-                lw.SetStyle(list.StyleConnectedLight)
-                lw.SetOutputMirror(os.Stdout)
-                for _, k := range keys {
-                    lw.AppendItem(k)
-                }
-                _ = lw.Render()
-                return nil
-            }
-            // Source
-            var src source.Source
-            spec := any(nil)
-            switch flagSource {
-                case "yaml", "":
+	rootCmd := &cobra.Command{
+		Use:   "wl <file|dir>",
+		Short: "Render a watchlist",
+		Args: func(cmd *cobra.Command, args []string) error {
+			// Allow running with no args when listing columns
+			listCols, _ := cmd.Flags().GetBool("list-columns")
+			if listCols {
+				return nil
+			}
+			if len(args) != 1 {
+				return errors.New("requires exactly 1 path argument (YAML file or directory)")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cmd.SilenceUsage = true
+			// List available columns and exit
+			if flagListColumns {
+				keys := make([]string, 0, len(columns.Registry))
+				for k := range columns.Registry {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				lw := list.NewWriter()
+				lw.SetStyle(list.StyleConnectedLight)
+				lw.SetOutputMirror(os.Stdout)
+				for _, k := range keys {
+					lw.AppendItem(k)
+				}
+				_ = lw.Render()
+				return nil
+			}
+			// Source
+			var src source.Source
+			spec := any(nil)
+			switch flagSource {
+			case "yaml", "":
 				src = source.YAMLSource{}
 				spec = args[0]
 			case "db":
@@ -203,6 +204,7 @@ func main() {
 				Concurrency:    flagConcurrency,
 				Color:          !flagNoColor,
 				PrettyJSON:     flagPrettyJSON,
+				MaxColWidth:    flagMaxColWidth,
 			})
 		},
 	}
@@ -215,12 +217,13 @@ func main() {
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
-    rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
-    rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
-    rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
-    rootCmd.Flags().BoolVar(&flagListColumns, "list-columns", false, "list available column names")
+	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
+	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
+	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
+	rootCmd.Flags().BoolVar(&flagListColumns, "list-columns", false, "list available column names")
+	rootCmd.Flags().IntVar(&flagMaxColWidth, "max-col-width", 40, "max width per column before wrapping (characters)")
 
-    if err := rootCmd.Execute(); err != nil {
-        os.Exit(1)
-    }
+	if err := rootCmd.Execute(); err != nil {
+		os.Exit(1)
+	}
 }

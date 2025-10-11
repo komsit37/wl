@@ -12,7 +12,8 @@ type Renderer interface {
 }
 
 type RenderOptions struct {
-	Columns    []string
-	Color      bool
-	PrettyJSON bool
+	Columns     []string
+	Color       bool
+	PrettyJSON  bool
+	MaxColWidth int
 }

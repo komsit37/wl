@@ -28,6 +28,7 @@ type ExecuteOptions struct {
 	Concurrency    int
 	Color          bool
 	PrettyJSON     bool
+	MaxColWidth    int
 }
 
 func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) error {
@@ -68,8 +69,9 @@ func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) err
 	}
 
 	return r.Renderer.Render(r.Writer, lists, render.RenderOptions{
-		Columns:    opts.Columns,
-		Color:      opts.Color,
-		PrettyJSON: opts.PrettyJSON,
+		Columns:     opts.Columns,
+		Color:       opts.Color,
+		PrettyJSON:  opts.PrettyJSON,
+		MaxColWidth: opts.MaxColWidth,
 	})
 }

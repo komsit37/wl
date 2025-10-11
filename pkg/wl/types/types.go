@@ -29,4 +29,20 @@ type Fundamentals struct {
 	Industry string
 	PE       *float64
 	ROE      *float64 // percent value, e.g., 12.3 for 12.3%
+	// AssetProfile-derived fields
+	Sector          string
+	Employees       int
+	Address1        string
+	City            string
+	Country         string
+	Zip             string
+	Phone           string
+	Website         string
+	IR              string
+	BusinessSummary string
+	OfficersCount   int
+	AvgOfficerAge   *float64
+	CEOName         string
+	CEOTitle        string
+	CEOAge          *int
 }

@@ -2,7 +2,9 @@ package enrich
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -15,13 +17,14 @@ import (
 type NeedMask uint64
 
 const (
-	NeedNone     NeedMask = 0
-	NeedPrice    NeedMask = 1 << iota // price
-	NeedChgPct                        // change percent
-	NeedExchange                      // exchange
-	NeedIndustry                      // industry
-	NeedPE                            // price/earnings
-	NeedROE                           // return on equity percent
+	NeedNone         NeedMask = 0
+	NeedPrice        NeedMask = 1 << iota // price
+	NeedChgPct                            // change percent
+	NeedExchange                          // exchange
+	NeedIndustry                          // industry (legacy; maps to assetProfile)
+	NeedPE                                // price/earnings
+	NeedROE                               // return on equity percent
+	NeedAssetProfile                      // assetProfile module (sector, industry, HQ, website, IR, officers)
 )
 
 // QuoteService fetches quote and fundamentals for a symbol.
@@ -43,15 +46,25 @@ func (s *YFService) Get(ctx context.Context, sym string, need NeedMask) (types.Q
 	if sym == "" {
 		return types.Quote{}, types.Fundamentals{}, nil
 	}
-	// Currently only request ModulePrice; other modules can be wired later.
+	// Build modules list based on need mask.
+	// Always include price because we often surface name and price.
 	mods := []yfgo.QuoteSummaryModule{yfgo.ModulePrice}
-	// In future: append modules based on need mask (e.g., SummaryProfile, DefaultKeyStatistics)
+	// Map legacy NeedIndustry to NeedAssetProfile as source of industry/sector.
+	if need&NeedAssetProfile != 0 || need&NeedIndustry != 0 {
+		mods = append(mods, yfgo.ModuleAssetProfile)
+	}
 
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
-	res, err := s.client.QuoteSummaryTyped(cctx, sym, mods)
+	// Fetch raw to allow decoding additional assetProfile fields (e.g., officers, phone, IR).
+	raw, err := s.client.QuoteSummary(cctx, sym, mods)
 	if err != nil {
 		return types.Quote{}, types.Fundamentals{}, err
+	}
+	// Decode into typed view for price convenience
+	var res yfgo.QuoteSummaryTyped
+	if b, ok := rawToJSON(raw); ok {
+		_ = json.Unmarshal(b, &res)
 	}
 	if res.Price == nil {
 		return types.Quote{}, types.Fundamentals{}, fmt.Errorf("no price for %s", sym)
@@ -83,9 +96,96 @@ func (s *YFService) Get(ctx context.Context, sym string, need NeedMask) (types.Q
 		q.Name = res.Price.LongName
 	}
 
-	// Fundamentals: currently not populated; stubs for future expansion.
+	// Fundamentals
 	var f types.Fundamentals
+	// Populate assetProfile-backed fields when requested
+	if need&NeedAssetProfile != 0 || need&NeedIndustry != 0 {
+		// Define a minimal struct to capture required fields.
+		var ap struct {
+			AssetProfile struct {
+				Sector              string `json:"sector"`
+				Industry            string `json:"industry"`
+				Website             string `json:"website"`
+				IrWebsite           string `json:"irWebsite"`
+				LongBusinessSummary string `json:"longBusinessSummary"`
+				Address1            string `json:"address1"`
+				City                string `json:"city"`
+				Country             string `json:"country"`
+				Zip                 string `json:"zip"`
+				Phone               string `json:"phone"`
+				FullTimeEmployees   int64  `json:"fullTimeEmployees"`
+				CompanyOfficers     []struct {
+					Name  string `json:"name"`
+					Title string `json:"title"`
+					Age   *int   `json:"age"`
+				} `json:"companyOfficers"`
+			} `json:"assetProfile"`
+		}
+		if b, ok := rawToJSON(raw); ok {
+			_ = json.Unmarshal(b, &ap)
+		}
+		f.Sector = ap.AssetProfile.Sector
+		f.Industry = ap.AssetProfile.Industry
+		if ap.AssetProfile.FullTimeEmployees > 0 {
+			f.Employees = int(ap.AssetProfile.FullTimeEmployees)
+		}
+		f.Address1 = ap.AssetProfile.Address1
+		f.City = ap.AssetProfile.City
+		f.Country = ap.AssetProfile.Country
+		f.Zip = ap.AssetProfile.Zip
+		f.Phone = ap.AssetProfile.Phone
+		f.Website = ap.AssetProfile.Website
+		f.IR = ap.AssetProfile.IrWebsite
+		f.BusinessSummary = ap.AssetProfile.LongBusinessSummary
+		// Officers
+		f.OfficersCount = len(ap.AssetProfile.CompanyOfficers)
+		var ageSum int
+		var ageCnt int
+		// CEO selection by title keywords
+		bestIdx := -1
+		for i, o := range ap.AssetProfile.CompanyOfficers {
+			if o.Title == "" {
+				continue
+			}
+			title := strings.ToLower(o.Title)
+			if strings.Contains(title, "ceo") || strings.Contains(title, "president") || strings.Contains(title, "representative director") {
+				bestIdx = i
+				break
+			}
+		}
+		if bestIdx == -1 && len(ap.AssetProfile.CompanyOfficers) > 0 {
+			bestIdx = 0
+		}
+		if bestIdx >= 0 {
+			o := ap.AssetProfile.CompanyOfficers[bestIdx]
+			f.CEOName = normalizeSpace(o.Name)
+			f.CEOTitle = normalizeSpace(o.Title)
+			if o.Age != nil {
+				v := *o.Age
+				f.CEOAge = &v
+			}
+		}
+		for _, o := range ap.AssetProfile.CompanyOfficers {
+			if o.Age != nil {
+				ageSum += *o.Age
+				ageCnt++
+			}
+		}
+		if ageCnt > 0 {
+			avg := float64(ageSum) / float64(ageCnt)
+			f.AvgOfficerAge = &avg
+		}
+	}
 	return q, f, nil
+}
+
+// rawToJSON marshals an interface{} into JSON bytes.
+func rawToJSON(v any) ([]byte, bool) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, false
+	}
+	return b, true
 }
 
 // CacheService decorates a QuoteService with TTL+LRU cache.
@@ -170,4 +270,13 @@ func (c *CacheService) removeFromOrderLocked(k string) {
 			return
 		}
 	}
+}
+
+// normalizeSpace collapses consecutive whitespace into single spaces and trims ends.
+func normalizeSpace(s string) string {
+	if s == "" {
+		return s
+	}
+	parts := strings.Fields(s)
+	return strings.Join(parts, " ")
 }
