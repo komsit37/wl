@@ -43,7 +43,8 @@ func Parse(expr string) (Filter, error) {
 	if strings.ContainsAny(expr, "*?") {
 		return Glob{pattern: expr}, nil
 	}
-	return Exact{value: expr}, nil
+	// Default: case-insensitive substring match (equivalent to *expr*).
+	return SubstrCI{needle: expr}, nil
 }
 
 // Implementations
@@ -77,3 +78,15 @@ func (r Regex) Match(name string) bool { return r.re.MatchString(name) }
 // String provides a human-readable representation useful for logs/errors.
 func (g Glob) String() string  { return fmt.Sprintf("glob:%s", g.pattern) }
 func (e Exact) String() string { return fmt.Sprintf("exact:%s", e.value) }
+
+// SubstrCI matches if name contains needle, case-insensitively.
+type SubstrCI struct{ needle string }
+
+func (s SubstrCI) Match(name string) bool {
+	if s.needle == "" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(name), strings.ToLower(s.needle))
+}
+
+func (s SubstrCI) String() string { return fmt.Sprintf("substr-ci:%s", s.needle) }

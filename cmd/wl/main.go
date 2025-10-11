@@ -116,7 +116,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
 	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
-	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: name[,name...]|glob|/regex/")
+	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
 	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
 	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
