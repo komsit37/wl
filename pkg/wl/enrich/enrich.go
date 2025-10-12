@@ -17,14 +17,16 @@ import (
 type NeedMask uint64
 
 const (
-	NeedNone         NeedMask = 0
-	NeedPrice        NeedMask = 1 << iota // price
-	NeedChgPct                            // change percent
-	NeedExchange                          // exchange
-	NeedIndustry                          // industry (legacy; maps to assetProfile)
-	NeedPE                                // price/earnings
-	NeedROE                               // return on equity percent
-	NeedAssetProfile                      // assetProfile module (sector, industry, HQ, website, IR, officers)
+	NeedNone          NeedMask = 0
+	NeedPrice         NeedMask = 1 << iota // price
+	NeedChgPct                             // change percent
+	NeedExchange                           // exchange
+	NeedIndustry                           // industry (legacy; maps to assetProfile)
+	NeedPE                                 // price/earnings
+	NeedROE                                // return on equity percent
+	NeedAssetProfile                       // assetProfile module (sector, industry, HQ, website, IR, officers)
+	NeedFinancialData                      // financialData module (margins, returns, ratios, cash/debt, targets)
+	NeedSummaryDetail                      // summaryDetail module (cap, beta, yield, PE, volume, 52w, etc.)
 )
 
 // QuoteService fetches quote and fundamentals for a symbol.
@@ -52,6 +54,12 @@ func (s *YFService) Get(ctx context.Context, sym string, need NeedMask) (types.Q
 	// Map legacy NeedIndustry to NeedAssetProfile as source of industry/sector.
 	if need&NeedAssetProfile != 0 || need&NeedIndustry != 0 {
 		mods = append(mods, yfgo.ModuleAssetProfile)
+	}
+	if need&NeedFinancialData != 0 {
+		mods = append(mods, yfgo.ModuleFinancialData)
+	}
+	if need&NeedSummaryDetail != 0 {
+		mods = append(mods, yfgo.ModuleSummaryDetail)
 	}
 
 	cctx, cancel := context.WithTimeout(ctx, s.timeout)
@@ -176,6 +184,240 @@ func (s *YFService) Get(ctx context.Context, sym string, need NeedMask) (types.Q
 			f.AvgOfficerAge = &avg
 		}
 	}
+	// Populate financialData-backed fields when requested
+	if need&NeedFinancialData != 0 {
+		var fd struct {
+			FinancialData struct {
+				CurrentRatio struct {
+					Fmt string `json:"fmt"`
+				} `json:"currentRatio"`
+				QuickRatio struct {
+					Fmt string `json:"fmt"`
+				} `json:"quickRatio"`
+				DebtToEquity struct {
+					Fmt string `json:"fmt"`
+				} `json:"debtToEquity"`
+				ReturnOnAssets struct {
+					Fmt string `json:"fmt"`
+				} `json:"returnOnAssets"`
+				ReturnOnEquity struct {
+					Fmt string `json:"fmt"`
+				} `json:"returnOnEquity"`
+				EbitdaMargins struct {
+					Fmt string `json:"fmt"`
+				} `json:"ebitdaMargins"`
+				OperatingMargins struct {
+					Fmt string `json:"fmt"`
+				} `json:"operatingMargins"`
+				ProfitMargins struct {
+					Fmt string `json:"fmt"`
+				} `json:"profitMargins"`
+				GrossMargins struct {
+					Fmt string `json:"fmt"`
+				} `json:"grossMargins"`
+				RevenueGrowth struct {
+					Fmt string `json:"fmt"`
+				} `json:"revenueGrowth"`
+				EarningsGrowth struct {
+					Fmt string `json:"fmt"`
+				} `json:"earningsGrowth"`
+				RevenuePerShare struct {
+					Fmt string `json:"fmt"`
+				} `json:"revenuePerShare"`
+				TotalCash struct {
+					Fmt string `json:"fmt"`
+				} `json:"totalCash"`
+				TotalDebt struct {
+					Fmt string `json:"fmt"`
+				} `json:"totalDebt"`
+				FreeCashflow struct {
+					Fmt string `json:"fmt"`
+				} `json:"freeCashflow"`
+				OperatingCashflow struct {
+					Fmt string `json:"fmt"`
+				} `json:"operatingCashflow"`
+				TargetHighPrice struct {
+					Fmt string `json:"fmt"`
+				} `json:"targetHighPrice"`
+				TargetLowPrice struct {
+					Fmt string `json:"fmt"`
+				} `json:"targetLowPrice"`
+				TargetMeanPrice struct {
+					Fmt string `json:"fmt"`
+				} `json:"targetMeanPrice"`
+				TargetMedianPrice struct {
+					Fmt string `json:"fmt"`
+				} `json:"targetMedianPrice"`
+				NumberOfAnalystOpinions struct {
+					Raw *int `json:"raw"`
+				} `json:"numberOfAnalystOpinions"`
+				RecommendationKey  string `json:"recommendationKey"`
+				RecommendationMean struct {
+					Fmt string `json:"fmt"`
+				} `json:"recommendationMean"`
+			} `json:"financialData"`
+		}
+		if b, ok := rawToJSON(raw); ok {
+			_ = json.Unmarshal(b, &fd)
+		}
+		f.Financial = types.Financials{
+			CurrentRatio:       fd.FinancialData.CurrentRatio.Fmt,
+			QuickRatio:         fd.FinancialData.QuickRatio.Fmt,
+			DebtToEquity:       fd.FinancialData.DebtToEquity.Fmt,
+			ReturnOnAssets:     fd.FinancialData.ReturnOnAssets.Fmt,
+			ReturnOnEquity:     fd.FinancialData.ReturnOnEquity.Fmt,
+			EBITDAttMargins:    fd.FinancialData.EbitdaMargins.Fmt,
+			OperatingMargins:   fd.FinancialData.OperatingMargins.Fmt,
+			ProfitMargins:      fd.FinancialData.ProfitMargins.Fmt,
+			GrossMargins:       fd.FinancialData.GrossMargins.Fmt,
+			RevenueGrowth:      fd.FinancialData.RevenueGrowth.Fmt,
+			EarningsGrowth:     fd.FinancialData.EarningsGrowth.Fmt,
+			RevenuePerShare:    fd.FinancialData.RevenuePerShare.Fmt,
+			TotalCash:          fd.FinancialData.TotalCash.Fmt,
+			TotalDebt:          fd.FinancialData.TotalDebt.Fmt,
+			FreeCashflow:       fd.FinancialData.FreeCashflow.Fmt,
+			OperatingCashflow:  fd.FinancialData.OperatingCashflow.Fmt,
+			TargetHighPrice:    fd.FinancialData.TargetHighPrice.Fmt,
+			TargetLowPrice:     fd.FinancialData.TargetLowPrice.Fmt,
+			TargetMeanPrice:    fd.FinancialData.TargetMeanPrice.Fmt,
+			TargetMedianPrice:  fd.FinancialData.TargetMedianPrice.Fmt,
+			RecommendationKey:  fd.FinancialData.RecommendationKey,
+			RecommendationMean: fd.FinancialData.RecommendationMean.Fmt,
+		}
+		if fd.FinancialData.NumberOfAnalystOpinions.Raw != nil {
+			f.Financial.NumberOfAnalystOpinions = *fd.FinancialData.NumberOfAnalystOpinions.Raw
+		}
+	}
+	// Populate summaryDetail-backed fields when requested
+    if need&NeedSummaryDetail != 0 {
+        var sd struct {
+            SummaryDetail struct {
+				Currency struct {
+					Fmt string `json:"fmt"`
+				} `json:"currency"`
+				MarketCap struct {
+					Fmt string `json:"fmt"`
+				} `json:"marketCap"`
+				Beta struct {
+					Fmt string `json:"fmt"`
+				} `json:"beta"`
+				DividendYield struct {
+					Fmt string `json:"fmt"`
+				} `json:"dividendYield"`
+				DividendRate struct {
+					Fmt string `json:"fmt"`
+				} `json:"dividendRate"`
+				PayoutRatio struct {
+					Fmt string `json:"fmt"`
+				} `json:"payoutRatio"`
+				TrailingPE struct {
+					Fmt string `json:"fmt"`
+				} `json:"trailingPE"`
+				ForwardPE struct {
+					Fmt string `json:"fmt"`
+				} `json:"forwardPE"`
+				PriceToSalesTrailing12Months struct {
+					Fmt string `json:"fmt"`
+				} `json:"priceToSalesTrailing12Months"`
+				AverageVolume struct {
+					Fmt string `json:"fmt"`
+				} `json:"averageVolume"`
+				AverageDailyVolume10Day struct {
+					Fmt string `json:"fmt"`
+				} `json:"averageDailyVolume10Day"`
+				AverageVolume10days struct {
+					Fmt string `json:"fmt"`
+				} `json:"averageVolume10days"`
+				RegularMarketVolume struct {
+					Fmt string `json:"fmt"`
+				} `json:"regularMarketVolume"`
+				Volume struct {
+					Fmt string `json:"fmt"`
+				} `json:"volume"`
+				Open struct {
+					Fmt string `json:"fmt"`
+				} `json:"open"`
+				PreviousClose struct {
+					Fmt string `json:"fmt"`
+				} `json:"previousClose"`
+				FiftyDayAverage struct {
+					Fmt string `json:"fmt"`
+				} `json:"fiftyDayAverage"`
+				TwoHundredDayAverage struct {
+					Fmt string `json:"fmt"`
+				} `json:"twoHundredDayAverage"`
+				DayHigh struct {
+					Fmt string `json:"fmt"`
+				} `json:"dayHigh"`
+				DayLow struct {
+					Fmt string `json:"fmt"`
+				} `json:"dayLow"`
+				FiftyTwoWeekHigh struct {
+					Fmt string `json:"fmt"`
+				} `json:"fiftyTwoWeekHigh"`
+				FiftyTwoWeekLow struct {
+					Fmt string `json:"fmt"`
+				} `json:"fiftyTwoWeekLow"`
+				AllTimeHigh struct {
+					Fmt string `json:"fmt"`
+				} `json:"allTimeHigh"`
+				AllTimeLow struct {
+					Fmt string `json:"fmt"`
+				} `json:"allTimeLow"`
+				ExDividendDate struct {
+					Fmt string `json:"fmt"`
+				} `json:"exDividendDate"`
+            FiveYearAvgDividendYield struct {
+                Fmt string `json:"fmt"`
+            } `json:"fiveYearAvgDividendYield"`
+        } `json:"summaryDetail"`
+    }
+    if b, ok := rawToJSON(raw); ok {
+        _ = json.Unmarshal(b, &sd)
+    }
+        f.Detail = types.SummaryDetail{
+            Currency:                 sd.SummaryDetail.Currency.Fmt,
+            MarketCap:                sd.SummaryDetail.MarketCap.Fmt,
+            Beta:                     sd.SummaryDetail.Beta.Fmt,
+            DividendYield:            sd.SummaryDetail.DividendYield.Fmt,
+            DividendRate:             sd.SummaryDetail.DividendRate.Fmt,
+            PayoutRatio:              sd.SummaryDetail.PayoutRatio.Fmt,
+			TrailingPE:               sd.SummaryDetail.TrailingPE.Fmt,
+			ForwardPE:                sd.SummaryDetail.ForwardPE.Fmt,
+			PriceToSalesTTM:          sd.SummaryDetail.PriceToSalesTrailing12Months.Fmt,
+			AverageVolume:            sd.SummaryDetail.AverageVolume.Fmt,
+			AverageDailyVolume10Day:  sd.SummaryDetail.AverageDailyVolume10Day.Fmt,
+			AverageVolume10days:      sd.SummaryDetail.AverageVolume10days.Fmt,
+			RegularMarketVolume:      sd.SummaryDetail.RegularMarketVolume.Fmt,
+			Volume:                   sd.SummaryDetail.Volume.Fmt,
+			Open:                     sd.SummaryDetail.Open.Fmt,
+			PreviousClose:            sd.SummaryDetail.PreviousClose.Fmt,
+			FiftyDayAverage:          sd.SummaryDetail.FiftyDayAverage.Fmt,
+			TwoHundredDayAverage:     sd.SummaryDetail.TwoHundredDayAverage.Fmt,
+			DayHigh:                  sd.SummaryDetail.DayHigh.Fmt,
+			DayLow:                   sd.SummaryDetail.DayLow.Fmt,
+			FiftyTwoWeekHigh:         sd.SummaryDetail.FiftyTwoWeekHigh.Fmt,
+			FiftyTwoWeekLow:          sd.SummaryDetail.FiftyTwoWeekLow.Fmt,
+			AllTimeHigh:              sd.SummaryDetail.AllTimeHigh.Fmt,
+			AllTimeLow:               sd.SummaryDetail.AllTimeLow.Fmt,
+			ExDividendDate:           sd.SummaryDetail.ExDividendDate.Fmt,
+            FiveYearAvgDividendYield: sd.SummaryDetail.FiveYearAvgDividendYield.Fmt,
+        }
+        // Fallback: some symbols expose marketCap under price module; fill if empty
+        if f.Detail.MarketCap == "" {
+            var pr struct {
+                Price struct {
+                    MarketCap struct{ Fmt string `json:"fmt"` } `json:"marketCap"`
+                } `json:"price"`
+            }
+            if b, ok := rawToJSON(raw); ok {
+                _ = json.Unmarshal(b, &pr)
+                if pr.Price.MarketCap.Fmt != "" {
+                    f.Detail.MarketCap = pr.Price.MarketCap.Fmt
+                }
+            }
+        }
+    }
 	return q, f, nil
 }
 

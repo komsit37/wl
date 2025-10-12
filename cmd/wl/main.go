@@ -4,11 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/jedib0t/go-pretty/v6/list"
 
@@ -29,6 +31,7 @@ func main() {
 		flagPrettyJSON  bool
 		flagColumns     string
 		flagColSet      string
+		flagConfigPath  string
 		flagFilter      string
 		flagCacheTTL    time.Duration
 		flagCacheSize   int
@@ -38,8 +41,15 @@ func main() {
 		flagMaxColWidth int
 	)
 
+	// AppConfig represents configuration loaded from Viper.
+	type AppConfig struct {
+		Columns    []string            `mapstructure:"columns"`
+		ColSet     []string            `mapstructure:"col_set"`
+		ColumnSets map[string][]string `mapstructure:"col_sets"`
+	}
+
 	rootCmd := &cobra.Command{
-		Use:   "wl <file|dir>",
+		Use:   "wl [file|dir]",
 		Short: "Render a watchlist",
 		Args: func(cmd *cobra.Command, args []string) error {
 			// Allow running with no args when listing columns
@@ -47,13 +57,70 @@ func main() {
 			if listCols {
 				return nil
 			}
-			if len(args) != 1 {
-				return errors.New("requires exactly 1 path argument (YAML file or directory)")
+			// Allow 0 or 1 arg; 0 means default watchlist dir under WL_HOME or ~/.wl
+			if len(args) > 1 {
+				return errors.New("accepts at most 1 path argument (YAML file or directory)")
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cmd.SilenceUsage = true
+			// Resolve home directory for wl:
+			// 1) --config points to a file; its directory becomes WL home if not default
+			// 2) WL_HOME or Wl_HOME env var points to base directory
+			// 3) default: ~/.wl
+			wlHome := os.Getenv("WL_HOME")
+			if wlHome == "" {
+				wlHome = os.Getenv("Wl_HOME")
+			}
+			if wlHome == "" {
+				userHome, _ := os.UserHomeDir()
+				wlHome = filepath.Join(userHome, ".wl")
+			}
+
+			// Configure Viper
+			vp := viper.New()
+			vp.SetConfigType("yaml")
+			// If --config specified, use it; otherwise use wlHome/config.yaml
+			cfgPath := flagConfigPath
+			if strings.TrimSpace(cfgPath) == "" {
+				cfgPath = filepath.Join(wlHome, "config.yaml")
+			}
+            vp.SetConfigFile(cfgPath)
+            // Read config only if the file exists; otherwise silently ignore
+            if st, err := os.Stat(cfgPath); err == nil && !st.IsDir() {
+                if err := vp.ReadInConfig(); err != nil {
+                    return fmt.Errorf("load config: %w", err)
+                }
+            }
+			// Back-compat alias: allow "col-sets" and "col_set" keys
+			// to be recognized alongside "col_sets" / "col_set".
+			// We’ll map "col-sets" to ColumnSets if present.
+			var cfg AppConfig
+			if err := vp.Unmarshal(&cfg); err != nil {
+				return fmt.Errorf("parse config: %w", err)
+			}
+			if cfg.ColumnSets == nil {
+				var m map[string][]string
+				if err := vp.UnmarshalKey("col-sets", &m); err == nil && len(m) > 0 {
+					cfg.ColumnSets = m
+				}
+			}
+			if len(cfg.ColSet) == 0 {
+				var sets []string
+				if err := vp.UnmarshalKey("col-set", &sets); err == nil && len(sets) > 0 {
+					cfg.ColSet = sets
+				}
+			}
+			// Merge custom column sets from config into built-ins (override on collision)
+			if len(cfg.ColumnSets) > 0 {
+				for k, v := range cfg.ColumnSets {
+					if v == nil {
+						continue
+					}
+					columns.Sets[k] = append([]string(nil), v...)
+				}
+			}
 			// List available columns and exit
 			if flagListColumns {
 				keys := make([]string, 0, len(columns.Registry))
@@ -76,7 +143,12 @@ func main() {
 			switch flagSource {
 			case "yaml", "":
 				src = source.YAMLSource{}
-				spec = args[0]
+				// Determine spec path: CLI arg or default wlHome/watchlist
+				if len(args) == 1 {
+					spec = args[0]
+				} else {
+					spec = filepath.Join(wlHome, "watchlist")
+				}
 			case "db":
 				return fmt.Errorf("db source not implemented: dsn=%s", flagDBDSN)
 			default:
@@ -178,9 +250,9 @@ func main() {
 				return nil
 			}
 
-			// Columns from --col-set and --columns
+			// Columns from config + --col-set and --columns
 			var cols []string
-			// Expand column sets first (preserves set order and inner order)
+			// 1) Column sets: CLI flag takes precedence, else config col_set
 			if strings.TrimSpace(flagColSet) != "" {
 				parts := strings.Split(flagColSet, ",")
 				expanded, err := columns.ExpandSets(parts)
@@ -188,13 +260,19 @@ func main() {
 					return err
 				}
 				cols = append(cols, expanded...)
+			} else if len(cfg.ColSet) > 0 {
+				expanded, err := columns.ExpandSets(cfg.ColSet)
+				if err != nil {
+					return err
+				}
+				cols = append(cols, expanded...)
 			}
+			// 2) Explicit columns: CLI flag takes precedence, else config columns
 			if strings.TrimSpace(flagColumns) != "" {
 				parts := strings.Split(flagColumns, ",")
 				for _, p := range parts {
 					p = strings.TrimSpace(p)
 					if p != "" {
-						// de-dupe preserving first occurrence (which may come from col-set)
 						already := false
 						for _, existing := range cols {
 							if existing == p {
@@ -205,6 +283,23 @@ func main() {
 						if !already {
 							cols = append(cols, p)
 						}
+					}
+				}
+			} else if len(cfg.Columns) > 0 {
+				for _, p := range cfg.Columns {
+					p = strings.TrimSpace(p)
+					if p == "" {
+						continue
+					}
+					already := false
+					for _, existing := range cols {
+						if existing == p {
+							already = true
+							break
+						}
+					}
+					if !already {
+						cols = append(cols, p)
 					}
 				}
 			}
@@ -236,6 +331,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
 	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile")
+	rootCmd.Flags().StringVar(&flagConfigPath, "config", "", "path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
 	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")

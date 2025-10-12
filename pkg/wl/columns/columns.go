@@ -22,6 +22,17 @@ type Resolver func(ctx context.Context, it types.Item, s Services) (string, erro
 // Registry maps column keys to resolvers.
 var Registry = map[string]Resolver{}
 
+// aliases provides case-insensitive and synonym mapping to canonical keys.
+// Keys and values should be lowercase.
+var aliases = map[string]string{
+    // summaryDetail synonyms
+    "marketcap":  "mktcap",
+    "market_cap": "mktcap",
+    // dividend synonyms
+    "div":   "div_rate",
+    "div%":  "div_yield%",
+}
+
 func init() {
 	// sym
 	Registry["sym"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
@@ -138,6 +149,220 @@ func init() {
 		}
 		return base, nil
 	}
+
+	// summaryProfile/assetProfile additional direct columns
+	Registry["address1"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedAssetProfile)
+		return f.Address1, nil
+	}
+	Registry["city"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedAssetProfile)
+		return f.City, nil
+	}
+	Registry["zip"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedAssetProfile)
+		return f.Zip, nil
+	}
+	Registry["country"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedAssetProfile)
+		return f.Country, nil
+	}
+	Registry["phone"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedAssetProfile)
+		return f.Phone, nil
+	}
+
+	// financialData-backed columns (selected interesting metrics)
+	Registry["roe%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.ReturnOnEquity, nil
+	}
+	Registry["roa%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.ReturnOnAssets, nil
+	}
+	Registry["pm%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.ProfitMargins, nil
+	}
+	Registry["om%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.OperatingMargins, nil
+	}
+	Registry["gm%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.GrossMargins, nil
+	}
+	Registry["de%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.DebtToEquity, nil
+	}
+	Registry["cr"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.CurrentRatio, nil
+	}
+	Registry["qr"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.QuickRatio, nil
+	}
+	Registry["rev_g%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.RevenueGrowth, nil
+	}
+	Registry["earn_g%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.EarningsGrowth, nil
+	}
+	Registry["cash"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.TotalCash, nil
+	}
+	Registry["debt"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.TotalDebt, nil
+	}
+	Registry["fcf"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.FreeCashflow, nil
+	}
+	Registry["ocf"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.OperatingCashflow, nil
+	}
+	Registry["rev_ps"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.RevenuePerShare, nil
+	}
+	Registry["tgt_mean"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.TargetMeanPrice, nil
+	}
+	Registry["reco"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		return f.Financial.RecommendationKey, nil
+	}
+	Registry["analysts"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedFinancialData)
+		if f.Financial.NumberOfAnalystOpinions <= 0 {
+			return "", nil
+		}
+		return formatIntComma(f.Financial.NumberOfAnalystOpinions), nil
+	}
+
+	// summaryDetail-backed columns
+	Registry["mktcap"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.MarketCap, nil
+	}
+	Registry["marketcap"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.MarketCap, nil
+	}
+	Registry["MarketCap"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.MarketCap, nil
+	}
+	Registry["market_cap"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.MarketCap, nil
+	}
+	Registry["beta"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.Beta, nil
+	}
+	Registry["div_yield%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.DividendYield, nil
+	}
+	Registry["div_rate"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.DividendRate, nil
+	}
+	Registry["payout%"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.PayoutRatio, nil
+	}
+	Registry["pe_ttm"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.TrailingPE, nil
+	}
+	Registry["pe_fwd"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.ForwardPE, nil
+	}
+	Registry["ps_ttm"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.PriceToSalesTTM, nil
+	}
+	// Alias simple 'pe' to trailing PE
+	Registry["pe"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.TrailingPE, nil
+	}
+	Registry["avg_vol"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return firstNonEmpty(f.Detail.AverageVolume, f.Detail.Volume), nil
+	}
+	Registry["avg_vol10d"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return firstNonEmpty(f.Detail.AverageDailyVolume10Day, f.Detail.AverageVolume10days), nil
+	}
+	Registry["vol"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return firstNonEmpty(f.Detail.RegularMarketVolume, f.Detail.Volume), nil
+	}
+	Registry["open"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.Open, nil
+	}
+	Registry["prev_close"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.PreviousClose, nil
+	}
+	Registry["50d_avg"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.FiftyDayAverage, nil
+	}
+	Registry["200d_avg"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.TwoHundredDayAverage, nil
+	}
+	Registry["day_high"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.DayHigh, nil
+	}
+	Registry["day_low"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.DayLow, nil
+	}
+	Registry["52w_high"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.FiftyTwoWeekHigh, nil
+	}
+	Registry["52w_low"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.FiftyTwoWeekLow, nil
+	}
+	Registry["ath"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.AllTimeHigh, nil
+	}
+	Registry["atl"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.AllTimeLow, nil
+	}
+	Registry["ex_div"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.ExDividendDate, nil
+	}
+	Registry["5y_avg_div_yield"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.FiveYearAvgDividendYield, nil
+	}
+	Registry["ccy"] = func(ctx context.Context, it types.Item, s Services) (string, error) {
+		_, f, _ := s.Quotes.Get(ctx, it.Sym, enrich.NeedSummaryDetail)
+		return f.Detail.Currency, nil
+	}
 }
 
 // Compute determines final column order from explicit list or inferred.
@@ -248,39 +473,59 @@ func insertAfter(s []string, idx int, v string) []string {
 
 // NeedForColumns computes a NeedMask for the given columns.
 func NeedForColumns(cols []string) enrich.NeedMask {
-	var mask enrich.NeedMask
-	for _, c := range cols {
-		switch c {
-		case "price":
-			mask |= enrich.NeedPrice
-		case "chg%":
-			mask |= enrich.NeedChgPct
-		case "exchange":
-			mask |= enrich.NeedExchange
-		case "industry":
-			mask |= enrich.NeedAssetProfile
-		case "pe":
-			mask |= enrich.NeedPE
-		case "roe%":
-			mask |= enrich.NeedROE
-		// AssetProfile-backed columns
-		case "sector", "employees", "website", "ir", "officers_count", "avg_officer_age", "business_summary", "hq", "ceo":
-			mask |= enrich.NeedAssetProfile
-		}
-	}
-	return mask
+    var mask enrich.NeedMask
+    for _, c := range cols {
+        // normalize and resolve aliases
+        lc := strings.ToLower(c)
+        if can, ok := aliases[lc]; ok {
+            lc = can
+        }
+        switch lc {
+        case "price":
+            mask |= enrich.NeedPrice
+        case "chg%":
+            mask |= enrich.NeedChgPct
+        case "exchange":
+            mask |= enrich.NeedExchange
+        case "industry":
+            mask |= enrich.NeedAssetProfile
+        case "pe":
+            mask |= enrich.NeedSummaryDetail
+        case "roe%":
+            // Support from financialData
+            mask |= enrich.NeedFinancialData
+        // AssetProfile-backed columns
+        case "sector", "employees", "website", "ir", "officers_count", "avg_officer_age", "business_summary", "hq", "ceo", "address1", "city", "zip", "country", "phone":
+            mask |= enrich.NeedAssetProfile
+        // FinancialData-backed columns
+        case "roa%", "pm%", "om%", "gm%", "de%", "cr", "qr", "rev_g%", "earn_g%", "cash", "debt", "fcf", "ocf", "rev_ps", "tgt_mean", "reco", "analysts":
+            mask |= enrich.NeedFinancialData
+        // summaryDetail-backed columns
+        case "mktcap", "marketcap", "market_cap", "beta", "div_yield%", "div_rate", "payout%", "pe_ttm", "pe_fwd", "ps_ttm", "avg_vol", "avg_vol10d", "vol", "open", "prev_close", "50d_avg", "200d_avg", "day_high", "day_low", "52w_high", "52w_low", "ath", "atl", "ex_div", "5y_avg_div_yield", "ccy":
+            mask |= enrich.NeedSummaryDetail
+        }
+    }
+    return mask
 }
 
 // RenderValue calls the resolver for the given column.
 func RenderValue(ctx context.Context, col string, it types.Item, s Services) (string, error) {
-	if r, ok := Registry[col]; ok {
-		return r(ctx, it, s)
-	}
-	// fallback to raw field string
-	if v, ok := it.Fields[col]; ok && v != nil {
-		return fmt.Sprint(v), nil
-	}
-	return "", nil
+    if r, ok := Registry[col]; ok {
+        return r(ctx, it, s)
+    }
+    // try lowercase and alias resolution
+    lc := strings.ToLower(col)
+    if can, ok := aliases[lc]; ok {
+        lc = can
+    }
+    if r, ok := Registry[lc]; ok {
+        return r(ctx, it, s)
+    }
+    // fallback to raw field string
+    if v, ok := it.Fields[col]; ok && v != nil {
+        return fmt.Sprint(v), nil
+    }
+    return "", nil
 }
 
 // filterNonEmpty joins non-empty trimmed strings using sep; returns slice of non-empty strings.
