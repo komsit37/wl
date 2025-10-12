@@ -28,6 +28,7 @@ func main() {
 		flagNoColor     bool
 		flagPrettyJSON  bool
 		flagColumns     string
+		flagColSet      string
 		flagFilter      string
 		flagCacheTTL    time.Duration
 		flagCacheSize   int
@@ -177,14 +178,33 @@ func main() {
 				return nil
 			}
 
-			// Columns
+			// Columns from --col-set and --columns
 			var cols []string
+			// Expand column sets first (preserves set order and inner order)
+			if strings.TrimSpace(flagColSet) != "" {
+				parts := strings.Split(flagColSet, ",")
+				expanded, err := columns.ExpandSets(parts)
+				if err != nil {
+					return err
+				}
+				cols = append(cols, expanded...)
+			}
 			if strings.TrimSpace(flagColumns) != "" {
 				parts := strings.Split(flagColumns, ",")
 				for _, p := range parts {
 					p = strings.TrimSpace(p)
 					if p != "" {
-						cols = append(cols, p)
+						// de-dupe preserving first occurrence (which may come from col-set)
+						already := false
+						for _, existing := range cols {
+							if existing == p {
+								already = true
+								break
+							}
+						}
+						if !already {
+							cols = append(cols, p)
+						}
 					}
 				}
 			}
@@ -215,6 +235,7 @@ func main() {
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
 	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
+	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
 	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
