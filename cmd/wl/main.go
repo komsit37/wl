@@ -123,20 +123,52 @@ func main() {
 					columns.Sets[k] = append([]string(nil), v...)
 				}
 			}
-			// List available columns and exit
+			// List available columns grouped by YF module (compact)
 			if flagListColumns {
-				keys := make([]string, 0, len(columns.Registry))
+				// Build a presence set of canonical column keys from the registry.
+				present := map[string]struct{}{}
 				for k := range columns.Registry {
-					keys = append(keys, k)
+					canon := strings.ToLower(k)
+					// Collapse common MarketCap synonyms to mktcap
+					switch canon {
+					case "marketcap", "market_cap":
+						canon = "mktcap"
+					}
+					present[canon] = struct{}{}
 				}
-				sort.Strings(keys)
-				lw := list.NewWriter()
-				lw.SetStyle(list.StyleConnectedLight)
-				lw.SetOutputMirror(os.Stdout)
-				for _, k := range keys {
-					lw.AppendItem(k)
+
+				// Define ordered groups by YF module
+				type group struct {
+					name string
+					cols []string
 				}
-				_ = lw.Render()
+				groups := []group{
+					{name: "price", cols: []string{"price", "chg%"}},
+					{name: "assetProfile", cols: []string{"name", "industry", "sector", "employees", "website", "ir", "officers_count", "avg_officer_age", "business_summary", "hq", "ceo", "address1", "city", "zip", "country", "phone"}},
+					{name: "financialData", cols: []string{"roe%", "roa%", "pm%", "om%", "gm%", "de%", "cr", "qr", "rev_g%", "earn_g%", "cash", "debt", "fcf", "ocf", "rev_ps", "tgt_mean", "reco", "analysts"}},
+					{name: "summaryDetail", cols: []string{"mktcap", "beta", "div_rate", "div_yield%", "payout%", "pe", "pe_ttm", "pe_fwd", "ps_ttm", "avg_vol", "avg_vol10d", "vol", "open", "prev_close", "50d_avg", "200d_avg", "day_high", "day_low", "52w_high", "52w_low", "ath", "atl", "ex_div", "5y_avg_div_yield", "ccy"}},
+					// Non-YF derived base fields (optional)
+					{name: "base", cols: []string{"sym"}},
+				}
+
+				// Render compact lines: group: col1,col2,... (only if present)
+				// Accent group name unless --no-color
+				grpStart, grpEnd := "", ""
+				if !flagNoColor {
+					grpStart, grpEnd = "\x1b[36m", "\x1b[0m" // cyan
+				}
+				for _, g := range groups {
+					line := make([]string, 0, len(g.cols))
+					for _, c := range g.cols {
+						if _, ok := present[c]; ok {
+							line = append(line, c)
+						}
+					}
+					if len(line) == 0 {
+						continue
+					}
+					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", grpStart, g.name, grpEnd, strings.Join(line, ","))
+				}
 				return nil
 			}
 
@@ -148,10 +180,15 @@ func main() {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
+				// Accent set name unless --no-color
+				setStart, setEnd := "", ""
+				if !flagNoColor {
+					setStart, setEnd = "\x1b[36m", "\x1b[0m" // cyan
+				}
 				for _, name := range keys {
 					cols := columns.Sets[name]
 					// compact: name: a,b,c
-					fmt.Fprintf(os.Stdout, "  %s: %s\n", name, strings.Join(cols, ","))
+					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", setStart, name, setEnd, strings.Join(cols, ","))
 				}
 				return nil
 			}
