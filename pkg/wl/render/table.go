@@ -11,9 +11,10 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
 
+	yfgo "github.com/komsit37/yf-go"
+
 	"github.com/komsit37/wl/pkg/wl/columns"
 	"github.com/komsit37/wl/pkg/wl/types"
-	yfgo "github.com/komsit37/yf-go"
 )
 
 type TableRenderer struct{ Client *yfgo.Client }
