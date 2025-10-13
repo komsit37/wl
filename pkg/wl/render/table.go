@@ -118,21 +118,6 @@ func renderFromRaw(key string, it types.Item, m map[string]any) string {
 			return v
 		}
 		return ""
-	case "price":
-		if v, ok := columns.Extract(m, "price.regularMarketPrice.fmt"); ok {
-			return v
-		}
-		return ""
-	case "chg%":
-		if v, ok := columns.Extract(m, "price.regularMarketChangePercent.fmt"); ok {
-			return v
-		}
-		return ""
-	case "officers_count":
-		if v, ok := columns.Extract(m, "assetProfile.companyOfficers.len()"); ok {
-			return v
-		}
-		return ""
 	case "avg_officer_age":
 		return avgOfficerAge(m)
 	case "hq":
@@ -188,7 +173,8 @@ func hqFromRaw(m map[string]any) string {
 	phone, _ := columns.Extract(m, "assetProfile.phone")
 	ir, _ := columns.Extract(m, "assetProfile.irWebsite")
 	web, _ := columns.Extract(m, "assetProfile.website")
-	loc := strings.TrimSpace(strings.Trim(strings.Join(filterNonEmpty([]string{city, country}, ", "), ", "), " "))
+	// Join city and country with proper separators and trim spaces
+	loc := strings.TrimSpace(strings.Join(filterNonEmpty([]string{city, country}), ", "))
 	parts := make([]string, 0, 3)
 	if loc != "" {
 		parts = append(parts, loc)
@@ -235,7 +221,7 @@ func ceoFromRaw(m map[string]any) string {
 			ageStr = " (" + ageStr + ")"
 		}
 	}
-	base := strings.TrimSpace(strings.Join(filterNonEmpty([]string{name}, " "), " "))
+	base := strings.TrimSpace(strings.Join(filterNonEmpty([]string{name}), " "))
 	if title != "" {
 		base = strings.TrimSpace(base + " — " + title)
 	}
@@ -243,7 +229,7 @@ func ceoFromRaw(m map[string]any) string {
 }
 
 // Utilities copied locally to avoid export churn
-func filterNonEmpty(parts []string, sep string) []string {
+func filterNonEmpty(parts []string) []string {
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
 		t := strings.TrimSpace(p)

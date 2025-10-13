@@ -3,7 +3,6 @@ package source
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -51,12 +50,7 @@ func (YAMLSource) Load(ctx context.Context, spec any) ([]types.Watchlist, error)
 
 		var all []types.Watchlist
 		for _, full := range files {
-			f, err := os.Open(full)
-			if err != nil {
-				return nil, err
-			}
-			data, err := io.ReadAll(f)
-			f.Close()
+			data, err := os.ReadFile(full)
 			if err != nil {
 				return nil, err
 			}
@@ -85,12 +79,7 @@ func (YAMLSource) Load(ctx context.Context, spec any) ([]types.Watchlist, error)
 	}
 
 	// Single file
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
