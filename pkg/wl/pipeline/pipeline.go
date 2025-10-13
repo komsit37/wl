@@ -3,10 +3,8 @@ package pipeline
 import (
 	"context"
 	"io"
-	"time"
 
 	"github.com/komsit37/wl/pkg/wl/columns"
-	"github.com/komsit37/wl/pkg/wl/enrich"
 	"github.com/komsit37/wl/pkg/wl/filter"
 	"github.com/komsit37/wl/pkg/wl/render"
 	"github.com/komsit37/wl/pkg/wl/source"
@@ -15,20 +13,16 @@ import (
 
 type Runner struct {
 	Source   source.Source
-	Quotes   enrich.QuoteService
 	Renderer render.Renderer
 	Writer   io.Writer
 }
 
 type ExecuteOptions struct {
-	Columns        []string
-	Filter         filter.Filter
-	PriceCacheTTL  time.Duration
-	PriceCacheSize int
-	Concurrency    int
-	Color          bool
-	PrettyJSON     bool
-	MaxColWidth    int
+	Columns     []string
+	Filter      filter.Filter
+	Color       bool
+	PrettyJSON  bool
+	MaxColWidth int
 }
 
 func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) error {
@@ -49,13 +43,6 @@ func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) err
 		}
 	}
 	lists = filtered
-
-	// Wrap quotes with cache if requested
-	svc := r.Quotes
-	if opts.PriceCacheTTL > 0 && opts.PriceCacheSize > 0 {
-		svc = enrich.NewCacheService(svc, opts.PriceCacheTTL, opts.PriceCacheSize)
-	}
-	_ = columns.Services{Quotes: svc} // reserved for future pre-enrichment
 
 	// Compute columns per list, honoring explicit and overrides
 	for i, l := range lists {

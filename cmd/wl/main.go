@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -15,7 +14,6 @@ import (
 	"github.com/jedib0t/go-pretty/v6/list"
 
 	"github.com/komsit37/wl/pkg/wl/columns"
-	"github.com/komsit37/wl/pkg/wl/enrich"
 	"github.com/komsit37/wl/pkg/wl/filter"
 	"github.com/komsit37/wl/pkg/wl/pipeline"
 	"github.com/komsit37/wl/pkg/wl/render"
@@ -33,9 +31,6 @@ func main() {
 		flagColSet      string
 		flagConfigPath  string
 		flagFilter      string
-		flagCacheTTL    time.Duration
-		flagCacheSize   int
-		flagConcurrency int
 		flagList        bool
 		flagListColumns bool
 		flagListColSets bool
@@ -123,72 +118,103 @@ func main() {
 					columns.Sets[k] = append([]string(nil), v...)
 				}
 			}
-			// List available columns grouped by YF module (compact)
+			// List available columns grouped by YF module (from registry)
 			if flagListColumns {
-				// Build a presence set of canonical column keys from the registry.
-				present := map[string]struct{}{}
-				for k := range columns.Registry {
-					canon := strings.ToLower(k)
-					// Collapse common MarketCap synonyms to mktcap
-					switch canon {
-					case "marketcap", "market_cap":
-						canon = "mktcap"
-					}
-					present[canon] = struct{}{}
-				}
-
-				// Define ordered groups by YF module
-				type group struct {
-					name string
-					cols []string
-				}
-				groups := []group{
-					{name: "price", cols: []string{"price", "chg%"}},
-					{name: "assetProfile", cols: []string{"name", "industry", "sector", "employees", "website", "ir", "officers_count", "avg_officer_age", "business_summary", "hq", "ceo", "address1", "city", "zip", "country", "phone"}},
-					{name: "financialData", cols: []string{"roe%", "roa%", "pm%", "om%", "gm%", "de%", "cr", "qr", "rev_g%", "earn_g%", "cash", "debt", "fcf", "ocf", "rev_ps", "tgt_mean", "reco", "analysts"}},
-					{name: "summaryDetail", cols: []string{"mktcap", "beta", "div_rate", "div_yield%", "payout%", "pe", "pe_ttm", "pe_fwd", "ps_ttm", "avg_vol", "avg_vol10d", "vol", "open", "prev_close", "50d_avg", "200d_avg", "day_high", "day_low", "52w_high", "52w_low", "ath", "atl", "ex_div", "5y_avg_div_yield", "ccy"}},
-					// Non-YF derived base fields (optional)
-					{name: "base", cols: []string{"sym"}},
-				}
-
-				// Render compact lines: group: col1,col2,... (only if present)
+				groups := columns.AvailableByModule()
+				// Stable module order preference
+				order := []string{"price", "assetProfile", "financialData", "summaryDetail", "base"}
 				// Accent group name unless --no-color
 				grpStart, grpEnd := "", ""
 				if !flagNoColor {
 					grpStart, grpEnd = "\x1b[36m", "\x1b[0m" // cyan
 				}
-				for _, g := range groups {
-					line := make([]string, 0, len(g.cols))
-					for _, c := range g.cols {
-						if _, ok := present[c]; ok {
-							line = append(line, c)
-						}
+				seen := map[string]bool{}
+				for _, name := range order {
+					if cols, ok := groups[name]; ok && len(cols) > 0 {
+						fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", grpStart, name, grpEnd, strings.Join(cols, ","))
+						seen[name] = true
 					}
-					if len(line) == 0 {
+				}
+				// Print any remaining groups not in preferred order
+				keys := make([]string, 0, len(groups))
+				for k := range groups {
+					if !seen[k] {
+						keys = append(keys, k)
+					}
+				}
+				sort.Strings(keys)
+				for _, name := range keys {
+					cols := groups[name]
+					if len(cols) == 0 {
 						continue
 					}
-					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", grpStart, g.name, grpEnd, strings.Join(line, ","))
+					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", grpStart, name, grpEnd, strings.Join(cols, ","))
 				}
 				return nil
 			}
 
 			// List column sets (built-in + config) in compact format and exit
 			if flagListColSets {
-				// Iterate merged sets in name-sorted order
-				keys := make([]string, 0, len(columns.Sets))
-				for k := range columns.Sets {
-					keys = append(keys, k)
-				}
-				sort.Strings(keys)
+				// Determine module sets vs custom sets (from config.yaml)
+				moduleNames := map[string]bool{"price": true, "assetProfile": true, "financialData": true, "summaryDetail": true}
 				// Accent set name unless --no-color
 				setStart, setEnd := "", ""
 				if !flagNoColor {
-					setStart, setEnd = "\x1b[36m", "\x1b[0m" // cyan
+					setStart, setEnd = "\x1b[36m", "\x1b[0m"
 				}
-				for _, name := range keys {
-					cols := columns.Sets[name]
-					// compact: name: a,b,c
-					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", setStart, name, setEnd, strings.Join(cols, ","))
+
+				// Helper to canonicalize and render a set
+				renderSet := func(name string, cols []string) {
+					can := make([]string, 0, len(cols))
+					seen := map[string]struct{}{}
+					for _, c := range cols {
+						if k, ok := columns.Canonical(c); ok {
+							if _, dup := seen[k]; dup {
+								continue
+							}
+							seen[k] = struct{}{}
+							can = append(can, k)
+						} else {
+							if _, dup := seen[c]; dup {
+								continue
+							}
+							seen[c] = struct{}{}
+							can = append(can, c)
+						}
+					}
+					fmt.Fprintf(os.Stdout, "%s%s%s: %s\n", setStart, name, setEnd, strings.Join(can, ","))
+				}
+
+				// 1) Module sets (price, assetProfile, financialData, summaryDetail) in stable order
+				order := []string{"price", "assetProfile", "financialData", "summaryDetail"}
+				printedModule := false
+				for _, name := range order {
+					if cols, ok := columns.Sets[name]; ok && len(cols) > 0 {
+						if !printedModule {
+							fmt.Fprintf(os.Stdout, "%sMODULE SETS%s\n", setStart, setEnd)
+							printedModule = true
+						}
+						renderSet(name, cols)
+					}
+				}
+
+				// 2) Custom sets from config.yaml (keys in cfg.ColumnSets that are not module sets)
+				// Print in name-sorted order
+				customKeys := make([]string, 0, len(cfg.ColumnSets))
+				for k := range cfg.ColumnSets {
+					if !moduleNames[k] {
+						customKeys = append(customKeys, k)
+					}
+				}
+				sort.Strings(customKeys)
+				if len(customKeys) > 0 {
+					if printedModule {
+						fmt.Fprintln(os.Stdout)
+					}
+					fmt.Fprintf(os.Stdout, "%sCUSTOM SETS%s\n", setStart, setEnd)
+				}
+				for _, name := range customKeys {
+					renderSet(name, columns.Sets[name])
 				}
 				return nil
 			}
@@ -210,18 +236,11 @@ func main() {
 				return fmt.Errorf("unknown source: %s", flagSource)
 			}
 
-			// Quotes service with cache
-			qs := enrich.NewYFService(5 * time.Second)
-			if flagCacheTTL > 0 && flagCacheSize <= 0 {
-				flagCacheSize = 1000
-			}
-
 			// Renderer
 			var rnd render.Renderer
-			services := columns.Services{Quotes: qs}
 			switch flagOutput {
 			case "table", "":
-				rnd = render.NewTableRenderer(services)
+				rnd = render.NewTableRenderer()
 			case "json":
 				rnd = render.NewJSONRenderer()
 			default:
@@ -362,19 +381,15 @@ func main() {
 			// Runner
 			run := &pipeline.Runner{
 				Source:   src,
-				Quotes:   qs,
 				Renderer: rnd,
 				Writer:   os.Stdout,
 			}
 			return run.Execute(cmd.Context(), spec, pipeline.ExecuteOptions{
-				Columns:        cols,
-				Filter:         f,
-				PriceCacheTTL:  flagCacheTTL,
-				PriceCacheSize: flagCacheSize,
-				Concurrency:    flagConcurrency,
-				Color:          !flagNoColor,
-				PrettyJSON:     flagPrettyJSON,
-				MaxColWidth:    flagMaxColWidth,
+				Columns:     cols,
+				Filter:      f,
+				Color:       !flagNoColor,
+				PrettyJSON:  flagPrettyJSON,
+				MaxColWidth: flagMaxColWidth,
 			})
 		},
 	}
@@ -390,9 +405,6 @@ func main() {
 	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile")
 	rootCmd.Flags().StringVar(&flagConfigPath, "config", "", "path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
-	rootCmd.Flags().DurationVar(&flagCacheTTL, "price-cache-ttl", 5*time.Second, "price cache TTL")
-	rootCmd.Flags().IntVar(&flagCacheSize, "price-cache-size", 1000, "price cache max size")
-	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
 	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
 	rootCmd.Flags().BoolVar(&flagListColumns, "list-columns", false, "list available column names")
 	// Alias: --list-cols behaves the same as --list-columns

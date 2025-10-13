@@ -3,24 +3,22 @@ package columns
 import "strings"
 
 // Sets defines named column groups that expand into lists of columns.
-// - "price": price-related columns
-// - "assetProfile": columns backed by Yahoo Finance assetProfile module
-var Sets = map[string][]string{
-	// Price-related columns
-	"price": {"price", "chg%"},
-	// Asset profile-backed columns
-	"assetProfile": {
-		"sector",
-		"industry",
-		"employees",
-		"website",
-		"ir",
-		"officers_count",
-		"avg_officer_age",
-		"business_summary",
-		"hq",
-		"ceo",
-	},
+// It is initialized from ColumnDef so that each Yahoo module has a set.
+// User config can merge/override in cmd/wl/main.go.
+var Sets = map[string][]string{}
+
+// BuildDefaultSetsFromDefs populates Sets with one set per module from ColumnDef.
+// Excludes the "base" group (non-Yahoo backed fields like sym/name unless mapped).
+func BuildDefaultSetsFromDefs() {
+	groups := AvailableByModule()
+	out := make(map[string][]string, len(groups))
+	for name, cols := range groups {
+		if name == "base" { // skip base group
+			continue
+		}
+		out[name] = append([]string(nil), cols...)
+	}
+	Sets = out
 }
 
 // ExpandSets returns the union of columns for the given set names.
