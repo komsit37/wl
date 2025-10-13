@@ -1,6 +1,6 @@
 % wl — Render a watchlist
 
-`wl` renders stock watchlists from YAML files. It fetches quotes and fundamentals from Yahoo Finance (via `github.com/komsit37/yf-go`) and prints a compact table or JSON.
+A small CLI tool to render stock watchlists from YAML files. It fetches quotes and fundamentals from Yahoo Finance (via `github.com/komsit37/yf-go`) and prints a compact table or JSON.
 
 ![Screenshot](refs/screenshot.png)
 
