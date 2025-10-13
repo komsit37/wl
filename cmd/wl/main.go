@@ -38,6 +38,7 @@ func main() {
 		flagConcurrency int
 		flagList        bool
 		flagListColumns bool
+		flagListColSets bool
 		flagMaxColWidth int
 	)
 
@@ -54,7 +55,8 @@ func main() {
 		Args: func(cmd *cobra.Command, args []string) error {
 			// Allow running with no args when listing columns
 			listCols, _ := cmd.Flags().GetBool("list-columns")
-			if listCols {
+			listColSets, _ := cmd.Flags().GetBool("list-col-sets")
+			if listCols || listColSets {
 				return nil
 			}
 			// Allow 0 or 1 arg; 0 means default watchlist dir under WL_HOME or ~/.wl
@@ -86,13 +88,13 @@ func main() {
 			if strings.TrimSpace(cfgPath) == "" {
 				cfgPath = filepath.Join(wlHome, "config.yaml")
 			}
-            vp.SetConfigFile(cfgPath)
-            // Read config only if the file exists; otherwise silently ignore
-            if st, err := os.Stat(cfgPath); err == nil && !st.IsDir() {
-                if err := vp.ReadInConfig(); err != nil {
-                    return fmt.Errorf("load config: %w", err)
-                }
-            }
+			vp.SetConfigFile(cfgPath)
+			// Read config only if the file exists; otherwise silently ignore
+			if st, err := os.Stat(cfgPath); err == nil && !st.IsDir() {
+				if err := vp.ReadInConfig(); err != nil {
+					return fmt.Errorf("load config: %w", err)
+				}
+			}
 			// Back-compat alias: allow "col-sets" and "col_set" keys
 			// to be recognized alongside "col_sets" / "col_set".
 			// We’ll map "col-sets" to ColumnSets if present.
@@ -135,6 +137,22 @@ func main() {
 					lw.AppendItem(k)
 				}
 				_ = lw.Render()
+				return nil
+			}
+
+			// List column sets (built-in + config) in compact format and exit
+			if flagListColSets {
+				// Iterate merged sets in name-sorted order
+				keys := make([]string, 0, len(columns.Sets))
+				for k := range columns.Sets {
+					keys = append(keys, k)
+				}
+				sort.Strings(keys)
+				for _, name := range keys {
+					cols := columns.Sets[name]
+					// compact: name: a,b,c
+					fmt.Fprintf(os.Stdout, "  %s: %s\n", name, strings.Join(cols, ","))
+				}
 				return nil
 			}
 			// Source
@@ -330,6 +348,8 @@ func main() {
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
 	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
+	// Alias: --cols behaves the same as --columns
+	rootCmd.Flags().StringVar(&flagColumns, "cols", "", "alias of --columns")
 	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile")
 	rootCmd.Flags().StringVar(&flagConfigPath, "config", "", "path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
@@ -338,6 +358,9 @@ func main() {
 	rootCmd.Flags().IntVar(&flagConcurrency, "concurrency", 5, "quote fetch concurrency")
 	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
 	rootCmd.Flags().BoolVar(&flagListColumns, "list-columns", false, "list available column names")
+	// Alias: --list-cols behaves the same as --list-columns
+	rootCmd.Flags().BoolVar(&flagListColumns, "list-cols", false, "alias of --list-columns")
+	rootCmd.Flags().BoolVar(&flagListColSets, "list-col-sets", false, "list column sets in compact form (built-in + config)")
 	rootCmd.Flags().IntVar(&flagMaxColWidth, "max-col-width", 40, "max width per column before wrapping (characters)")
 
 	if err := rootCmd.Execute(); err != nil {

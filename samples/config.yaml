@@ -1,51 +1,53 @@
 col_sets:
-  overview:
-    - price
-    - chg%
-    - sector
-    - industry
-    - mktcap
-    - beta
-  valuation:
-    - pe
-    - pe_fwd
-    - ps_ttm
-    - roe%
-    - roa%
-  dividends:
-    - div_rate
-    - div_yield%
-    - payout%
-    - ex_div
-    - 5y_avg_div_yield
-  margins:
-    - gm%
-    - om%
-    - pm%
-  growth:
-    - rev_g%
-    - earn_g%
-  cashflow:
-    - cash
-    - debt
-    - fcf
-    - ocf
-  volume:
-    - avg_vol
-    - avg_vol10d
-    - vol
-  ranges:
-    - 50d_avg
-    - 200d_avg
-    - 52w_high
-    - 52w_low
-    - ath
-    - atl
-  targets:
-    - tgt_mean
-    - reco
-    - analysts
-
+    sym:
+        - sym
+        - name
+    overview:
+        - price
+        - chg%
+        - sector
+        - industry
+        - mktcap
+        - beta
+    valuation:
+        - pe
+        - pe_fwd
+        - ps_ttm
+        - roe%
+        - roa%
+    dividends:
+        - div_rate
+        - div_yield%
+        - payout%
+        - ex_div
+        - 5y_avg_div_yield
+    margins:
+        - gm%
+        - om%
+        - pm%
+    growth:
+        - rev_g%
+        - earn_g%
+    cashflow:
+        - cash
+        - debt
+        - fcf
+        - ocf
+    volume:
+        - avg_vol
+        - avg_vol10d
+        - vol
+    ranges:
+        - 50d_avg
+        - 200d_avg
+        - 52w_high
+        - 52w_low
+        - ath
+        - atl
+    targets:
+        - tgt_mean
+        - reco
+        - analysts
 # You can use multiple sets in --col-set, e.g.:
 #   wl <path> --col-set "price,overview,valuation"
 # Or point wl to this file with --config samples/config.yaml
