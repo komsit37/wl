@@ -32,6 +32,15 @@ func ExpandSets(setNames []string) ([]string, error) {
 		if name == "" {
 			continue
 		}
+		// Special dynamic set: "yaml" expands later based on items.
+		// We pass the token through so downstream can expand per-list.
+		if name == "yaml" {
+			if _, ok := seen[name]; !ok {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+			continue
+		}
 		cols, ok := Sets[name]
 		if !ok {
 			// Unknown set is an error; surface clear message to caller.

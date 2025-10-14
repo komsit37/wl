@@ -252,14 +252,49 @@ func RequiredModules(cols []string) []yfgo.QuoteSummaryModule {
 // Compute determines final column order from explicit list or inferred from item fields.
 func Compute(explicit []string, items []types.Item) []string {
 	if len(explicit) > 0 {
+		// Expand special token "yaml" into all custom YAML fields
+		// present across items (case-insensitive, excluding sym/name).
+		// Preserve the order of tokens, de-duplicating as we go.
+		customSet := map[string]struct{}{}
+		for _, it := range items {
+			for k := range it.Fields {
+				lk := strings.ToLower(k)
+				if lk == "sym" || lk == "name" {
+					continue
+				}
+				customSet[k] = struct{}{}
+			}
+		}
+		// Build a stable, sorted list of custom keys
+		customKeys := make([]string, 0, len(customSet))
+		for k := range customSet {
+			customKeys = append(customKeys, k)
+		}
+		sort.Strings(customKeys)
+
 		seen := map[string]struct{}{}
-		out := make([]string, 0, len(explicit))
-		for _, k := range explicit {
-			if _, ok := seen[k]; ok {
+		out := make([]string, 0, len(explicit)+len(customKeys))
+		for _, tok := range explicit {
+			t := strings.TrimSpace(tok)
+			if t == "" {
 				continue
 			}
-			seen[k] = struct{}{}
-			out = append(out, k)
+			if strings.EqualFold(t, "yaml") {
+				// Inline expand custom YAML fields at this position
+				for _, ck := range customKeys {
+					if _, dup := seen[ck]; dup {
+						continue
+					}
+					seen[ck] = struct{}{}
+					out = append(out, ck)
+				}
+				continue
+			}
+			if _, dup := seen[t]; dup {
+				continue
+			}
+			seen[t] = struct{}{}
+			out = append(out, t)
 		}
 		return out
 	}

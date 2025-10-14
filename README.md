@@ -152,7 +152,7 @@ watchlist:
 
 ## Config and column sets
 
-`wl` has built-in sets for each Yahoo module (`price`, `assetProfile`, `financialData`, `summaryDetail`). You can define your own sets in a config file and reference them via `--col-set`.
+`wl` has built-in sets for each Yahoo module (`price`, `assetProfile`, `financialData`, `summaryDetail`). It also supports a special dynamic set `yaml` that expands to all custom fields present in your YAML items. You can define your own sets in a config file and reference them via `--col-set`.
 
 Sample config (samples/config.yaml):
 
@@ -168,6 +168,9 @@ col_sets:
   volume: [avg_vol, avg_vol10d, vol]
   ranges: [50d_avg, 200d_avg, 52w_high, 52w_low, ath, atl]
   targets: [tgt_mean, reco, analysts]
+
+# Use the dynamic YAML fields set inline with others
+# --col-set "sym,overview,yaml" will expand `yaml` into all custom fields
 ```
 
 Use sets and/or explicit columns; sets expand first, then explicit columns append:

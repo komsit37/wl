@@ -216,6 +216,12 @@ func main() {
 				for _, name := range customKeys {
 					renderSet(name, columns.Sets[name])
 				}
+				// Mention special dynamic sets
+				if printedModule || len(customKeys) > 0 {
+					fmt.Fprintln(os.Stdout)
+				}
+				fmt.Fprintf(os.Stdout, "%sSPECIAL SETS%s\n", setStart, setEnd)
+				fmt.Fprintf(os.Stdout, "%syaml%s: custom fields from YAML (expands per list)\n", setStart, setEnd)
 				return nil
 			}
 			// Source
@@ -402,7 +408,7 @@ func main() {
 	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
 	// Alias: --cols behaves the same as --columns
 	rootCmd.Flags().StringVar(&flagColumns, "cols", "", "alias of --columns")
-	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile")
+	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile,yaml")
 	rootCmd.Flags().StringVar(&flagConfigPath, "config", "", "path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)")
 	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
