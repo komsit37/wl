@@ -51,3 +51,11 @@ col_sets:
 # You can use multiple sets in --col-set, e.g.:
 #   wl <path> --col-set "price,overview,valuation"
 # Or point wl to this file with --config samples/config.yaml
+
+# Default location of your watchlists when no path is provided on CLI.
+# Can be absolute or relative; a relative path resolves against $WL_HOME (or ~/.wl).
+# Examples:
+# default_watchlist: watchlist              # resolves to $WL_HOME/watchlist
+# default_watchlist: ./samples              # resolves to $WL_HOME/samples
+# default_watchlist: /abs/path/to/watchlist # absolute path
+default_watchlist: watchlist

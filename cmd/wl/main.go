@@ -20,6 +20,29 @@ import (
 	"github.com/komsit37/wl/pkg/wl/source"
 )
 
+// resolvePath expands a path that may be:
+// - starting with '~' (expanded to the user's home), or
+// - relative (resolved against baseDir), or
+// - absolute (returned as-is after '~' expansion).
+func resolvePath(p string, baseDir string) string {
+    p = strings.TrimSpace(p)
+    if p == "" {
+        return p
+    }
+    if strings.HasPrefix(p, "~") {
+        if home, err := os.UserHomeDir(); err == nil {
+            p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+        }
+    }
+    if filepath.IsAbs(p) {
+        return p
+    }
+    if baseDir == "" {
+        return p
+    }
+    return filepath.Join(baseDir, p)
+}
+
 func main() {
 	var (
 		flagSource      string
@@ -44,6 +67,9 @@ func main() {
 		Columns    []string            `mapstructure:"columns"`
 		ColSet     []string            `mapstructure:"col_set"`
 		ColumnSets map[string][]string `mapstructure:"col_sets"`
+		// DefaultWatchlist sets the default watchlist path when no CLI path arg is provided.
+		// Can be absolute or relative (relative resolves against wlHome).
+		DefaultWatchlist string `mapstructure:"default_watchlist"`
 	}
 
 	rootCmd := &cobra.Command{
@@ -109,6 +135,13 @@ func main() {
 				var sets []string
 				if err := vp.UnmarshalKey("col-set", &sets); err == nil && len(sets) > 0 {
 					cfg.ColSet = sets
+				}
+			}
+			// Back-compat alias for default watchlist key
+			if strings.TrimSpace(cfg.DefaultWatchlist) == "" {
+				var s string
+				if err := vp.UnmarshalKey("default-watchlist", &s); err == nil && strings.TrimSpace(s) != "" {
+					cfg.DefaultWatchlist = s
 				}
 			}
 			// Merge custom column sets from config into built-ins (override on collision)
@@ -232,11 +265,15 @@ func main() {
 			switch flagSource {
 			case "yaml", "":
 				src = source.YAMLSource{}
-				// Determine spec path: CLI arg or default wlHome/watchlist
+				// Determine spec path: CLI arg or config default or wlHome/watchlist
 				if len(args) == 1 {
 					spec = args[0]
 				} else {
-					spec = filepath.Join(wlHome, "watchlist")
+					def := cfg.DefaultWatchlist
+					if strings.TrimSpace(def) == "" {
+						def = filepath.Join(wlHome, "watchlist")
+					}
+					spec = resolvePath(def, wlHome)
 				}
 			case "db":
 				return fmt.Errorf("db source not implemented: dsn=%s", flagDBDSN)
@@ -403,6 +440,7 @@ func main() {
 			})
 		},
 	}
+
 
 	rootCmd.Flags().StringVar(&flagSource, "source", "yaml", "data source: yaml|db")
 	rootCmd.Flags().StringVar(&flagDBDSN, "db-dsn", "", "database DSN for db source")
