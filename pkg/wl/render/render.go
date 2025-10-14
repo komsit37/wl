@@ -16,4 +16,7 @@ type RenderOptions struct {
 	Color       bool
 	PrettyJSON  bool
 	MaxColWidth int
+	// Sorting
+	SortBy   string
+	SortDesc bool
 }

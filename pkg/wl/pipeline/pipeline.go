@@ -23,6 +23,9 @@ type ExecuteOptions struct {
 	Color       bool
 	PrettyJSON  bool
 	MaxColWidth int
+	// Sorting
+	SortBy   string
+	SortDesc bool
 }
 
 func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) error {
@@ -60,5 +63,7 @@ func (r *Runner) Execute(ctx context.Context, spec any, opts ExecuteOptions) err
 		Color:       opts.Color,
 		PrettyJSON:  opts.PrettyJSON,
 		MaxColWidth: opts.MaxColWidth,
+		SortBy:      opts.SortBy,
+		SortDesc:    opts.SortDesc,
 	})
 }

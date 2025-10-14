@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
@@ -64,16 +66,82 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 			tw.SetColumnConfigs(cfgs)
 		}
 
-		// Rows
+		// Pre-fetch and compute sort keys
+		type rowData struct {
+			it       types.Item
+			raw      map[string]any
+			dispSort string
+			numSort  float64
+			hasNum   bool
+			missing  bool
+		}
+
+		rows := make([]rowData, 0, len(list.Items))
+		// Determine modules needed for display columns plus possibly sort column
+		neededCols := cols
+		if strings.TrimSpace(opts.SortBy) != "" {
+			// ensure sort column is included for module calc
+			neededCols = append(append([]string(nil), cols...), opts.SortBy)
+		}
+		mods := columns.RequiredModules(neededCols)
 		for _, it := range list.Items {
-			// Compute required modules and fetch once per symbol
-			mods := columns.RequiredModules(cols)
 			raw, err := r.Client.QuoteSummary(context.Background(), it.Sym, mods)
 			if err != nil {
 				raw = nil
 			}
 			m := columns.RawToMap(raw)
+			rd := rowData{it: it, raw: m}
+			if strings.TrimSpace(opts.SortBy) != "" {
+				rd.dispSort, rd.numSort, rd.hasNum, rd.missing = computeSortKey(opts.SortBy, it, m)
+			}
+			rows = append(rows, rd)
+		}
 
+		// Sort if requested
+		if strings.TrimSpace(opts.SortBy) != "" {
+			sort.SliceStable(rows, func(i, j int) bool {
+				a, b := rows[i], rows[j]
+				// Missing values sort last
+				if a.missing && b.missing {
+					return false
+				}
+				if a.missing {
+					return false
+				}
+				if b.missing {
+					return true
+				}
+				// Numeric compare when both numeric
+				if a.hasNum && b.hasNum {
+					if opts.SortDesc {
+						if a.numSort == b.numSort {
+							return strings.Compare(a.dispSort, b.dispSort) > 0
+						}
+						return a.numSort > b.numSort
+					}
+					if a.numSort == b.numSort {
+						return strings.Compare(a.dispSort, b.dispSort) < 0
+					}
+					return a.numSort < b.numSort
+				}
+				// Fallback to case-insensitive lexicographic compare
+				ad, bd := strings.ToLower(a.dispSort), strings.ToLower(b.dispSort)
+				if opts.SortDesc {
+					if ad == bd {
+						return a.dispSort > b.dispSort
+					}
+					return ad > bd
+				}
+				if ad == bd {
+					return a.dispSort < b.dispSort
+				}
+				return ad < bd
+			})
+		}
+
+		// Render rows
+		for _, rdata := range rows {
+			it, m := rdata.it, rdata.raw
 			row := make(table.Row, len(cols))
 			for i, c := range cols {
 				key := c
@@ -145,6 +213,135 @@ func renderFromRaw(key string, it types.Item, m map[string]any) string {
 		}
 		return ""
 	}
+}
+
+// computeSortKey derives display string and best-effort numeric value for sorting.
+// It handles known YF-backed columns (preferring raw values), YAML custom fields,
+// formatted strings (currency, K/M/B/T), and percentages like chg%.
+func computeSortKey(col string, it types.Item, m map[string]any) (disp string, num float64, hasNum bool, missing bool) {
+	key := col
+	if k, ok := columns.Canonical(col); ok {
+		key = k
+	}
+	// Display value using render to ensure consistent fallback behavior
+	disp = renderFromRaw(key, it, m)
+	d := strings.TrimSpace(disp)
+	if d == "" {
+		return disp, 0, false, true
+	}
+
+	// Try to extract numeric raw for known keys
+	// Special-case chg%
+	if key == "chg%" {
+		if v, ok := columns.Extract(m, "price.regularMarketChangePercent.raw"); ok {
+			if f, err := parseFloatStrict(v); err == nil {
+				return disp, f, true, false
+			}
+		}
+	}
+	// If key has a registered def with a .fmt path, try .raw first
+	if def, ok := columns.GetDef(key); ok && strings.Contains(def.Path, ".fmt") {
+		rawPath := strings.Replace(def.Path, ".fmt", ".raw", 1)
+		if v, ok := columns.Extract(m, rawPath); ok {
+			if f, err := parseFloatStrict(v); err == nil {
+				return disp, f, true, false
+			}
+		}
+	}
+
+	// Fallback: parse formatted text (currency, percent, K/M/B/T)
+	if f, ok := parseFormattedNumber(d); ok {
+		return disp, f, true, false
+	}
+
+	// YAML custom fields may be numeric; try to parse directly from item.Fields case-insensitively
+	if it.Fields != nil {
+		lkey := strings.ToLower(key)
+		for fk, fv := range it.Fields {
+			if strings.ToLower(fk) == lkey {
+				s := strings.TrimSpace(fmt.Sprint(fv))
+				if s != "" {
+					if f, err := parseFloatStrict(s); err == nil {
+						return disp, f, true, false
+					}
+					if f, ok := parseFormattedNumber(s); ok {
+						return disp, f, true, false
+					}
+				}
+				break
+			}
+		}
+	}
+
+	// Not numeric; use display string for lexicographic sort
+	return disp, 0, false, false
+}
+
+// parseFloatStrict tries to parse a plain float string.
+func parseFloatStrict(s string) (float64, error) {
+	return strconv.ParseFloat(strings.TrimSpace(s), 64)
+}
+
+// parseFormattedNumber parses values like "$1,234.56", "1.2B", "-3.4%", "(5.6)", etc.
+func parseFormattedNumber(s string) (float64, bool) {
+	if s == "" {
+		return 0, false
+	}
+	t := strings.TrimSpace(s)
+	// Handle parentheses for negatives
+	neg := false
+	if strings.HasPrefix(t, "(") && strings.HasSuffix(t, ")") {
+		neg = true
+		t = strings.TrimSpace(t[1 : len(t)-1])
+	}
+	// Strip currency symbols and spaces
+	// Keep digits, signs, dot, percent, and K/M/B/T suffixes
+	cleaned := make([]rune, 0, len(t))
+	for _, r := range t {
+		if (r >= '0' && r <= '9') || r == '.' || r == '-' || r == '+' || r == '%' || r == 'K' || r == 'M' || r == 'B' || r == 'T' || r == 'k' || r == 'm' || r == 'b' || r == 't' {
+			cleaned = append(cleaned, r)
+		}
+	}
+	u := string(cleaned)
+	if u == "" {
+		return 0, false
+	}
+	// Percent
+	isPct := strings.HasSuffix(u, "%")
+	if isPct {
+		u = strings.TrimSuffix(u, "%")
+	}
+	// Suffix multiplier
+	mult := 1.0
+	if len(u) > 0 {
+		last := u[len(u)-1]
+		switch last {
+		case 'K', 'k':
+			mult = 1e3
+			u = u[:len(u)-1]
+		case 'M', 'm':
+			mult = 1e6
+			u = u[:len(u)-1]
+		case 'B', 'b':
+			mult = 1e9
+			u = u[:len(u)-1]
+		case 'T', 't':
+			mult = 1e12
+			u = u[:len(u)-1]
+		}
+	}
+	f, err := strconv.ParseFloat(u, 64)
+	if err != nil {
+		return 0, false
+	}
+	if neg {
+		f = -f
+	}
+	if isPct {
+		// Keep as percentage value (e.g., 5.3% => 5.3)
+		// Do not convert to fraction; sorting by displayed percent is expected
+	}
+	return f * mult, true
 }
 
 func avgOfficerAge(m map[string]any) string {

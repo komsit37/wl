@@ -99,10 +99,25 @@ Flags:
       --list-cols           alias of --list-columns
       --list-columns        list available column names
       --max-col-width int   max width per column before wrapping (characters) (default 40)
+      --sort string         sort rows by column (handles text, numbers, formatted values, and chg%)
+      --desc                sort in descending order (default asc)
       --no-color            disable color output
       --output string       output format: table|json (default "table")
       --pretty-json         pretty-print JSON output
       --source string       data source: yaml|db (default "yaml")
+```
+
+### Sorting
+
+Use `--sort <column>` to sort table rows by a column. Sorting understands text, numeric values, formatted numbers (e.g., `$1,234`, `1.2B`), and percentages (e.g., `chg%`). Add `--desc` to sort in descending order.
+
+Examples:
+
+```
+wl <path> --columns "sym,name,price,chg%" --sort chg% --desc   # top gainers first
+wl <path> --col-set "sym,overview" --sort price                # lowest price first
+wl <path> --columns "sym,note,rank" --sort rank                # YAML field numeric
+wl <path> --columns "sym,note" --sort note                     # YAML field text
 ```
 
 ## YAML format

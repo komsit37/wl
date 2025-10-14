@@ -35,6 +35,8 @@ func main() {
 		flagListColumns bool
 		flagListColSets bool
 		flagMaxColWidth int
+		flagSortBy      string
+		flagSortDesc    bool
 	)
 
 	// AppConfig represents configuration loaded from Viper.
@@ -396,6 +398,8 @@ func main() {
 				Color:       !flagNoColor,
 				PrettyJSON:  flagPrettyJSON,
 				MaxColWidth: flagMaxColWidth,
+				SortBy:      flagSortBy,
+				SortDesc:    flagSortDesc,
 			})
 		},
 	}
@@ -417,6 +421,9 @@ func main() {
 	rootCmd.Flags().BoolVar(&flagListColumns, "list-cols", false, "alias of --list-columns")
 	rootCmd.Flags().BoolVar(&flagListColSets, "list-col-sets", false, "list column sets in compact form (built-in + config)")
 	rootCmd.Flags().IntVar(&flagMaxColWidth, "max-col-width", 40, "max width per column before wrapping (characters)")
+	// Sorting
+	rootCmd.Flags().StringVar(&flagSortBy, "sort", "", "sort rows by column (handles text, numbers, formatted values, and chg%)")
+	rootCmd.Flags().BoolVar(&flagSortDesc, "desc", false, "sort in descending order (default asc)")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
