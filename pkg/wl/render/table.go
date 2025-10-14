@@ -125,9 +125,22 @@ func renderFromRaw(key string, it types.Item, m map[string]any) string {
 	case "ceo":
 		return ceoFromRaw(m)
 	default:
+		// 1) Built-in/YF-backed columns via registered path
 		if def, ok := columns.GetDef(key); ok && strings.TrimSpace(def.Path) != "" {
 			if v, ok := columns.Extract(m, def.Path); ok {
 				return v
+			}
+		}
+		// 2) Custom YAML fields: fall back to item fields (case-insensitive)
+		if it.Fields != nil {
+			if v, ok := it.Fields[key]; ok && v != nil {
+				return strings.TrimSpace(fmt.Sprint(v))
+			}
+			lk := strings.ToLower(key)
+			for k, v := range it.Fields {
+				if strings.ToLower(k) == lk && v != nil {
+					return strings.TrimSpace(fmt.Sprint(v))
+				}
 			}
 		}
 		return ""
