@@ -1,8 +1,45 @@
-% wl — Render a watchlist
+# wl — watchlists for terminal geeks
 
 A small CLI tool to render stock watchlists from YAML files. It fetches quotes and fundamentals from Yahoo Finance (via `github.com/komsit37/yf-go`) and prints a compact table or JSON.
 
 ![Screenshot](refs/screenshot.png)
+
+## Why?
+
+- Fragmentation: I keep watchlists across multiple tools; syncing them is painful.
+- Files > forms: a local YAML file is faster to edit and easy to version.
+- Terminal‑first: faster, more organized, and AI‑context friendly.
+- Tool gaps: TradingView isn’t customizable, TIKR feels slow, and Koyfin often lacks up‑to‑date prices for Japanese stocks.
+
+This project is part of my initiatives to move more of my investing workflow into the terminal. My research lives in Markdown; keeping the watchlist next to those notes—with custom fields—keeps everything simple and efficient.
+
+## Who Is This For?
+
+Geeky investors who like the terminal. It’s not aimed at everyday investors.
+
+## Features
+
+- Simple, flexible YAML watchlists: supports single files or nested, multi‑level groups ([see samples/](samples/)).
+
+```yaml
+watchlist:
+  - sym: 7203.T
+    note: core
+    good: profitable biz
+  - sym: 1813.T
+  - sym: 7292.T
+```
+
+- Customizable columns: choose explicit columns or sets; display any field from your YAML alongside many Yahoo‑backed columns. Discover columns with `--list-columns` (alias: `--list-cols`):
+
+```bash
+go/wl » wl --list-cols
+price: chg%,name,price
+assetProfile: address1,avg_officer_age,business_summary,ceo,city,country,employees,hq,industry,ir,officers_count,phone,sector,website,zip
+financialData: analysts,cash,cr,de%,debt,earn_g%,fcf,gm%,ocf,om%,pm%,qr,reco,rev_g%,rev_ps,roa%,roe%,tgt_mean
+summaryDetail: 200d_avg,50d_avg,52w_high,52w_low,5y_avg_div_yield,ath,atl,avg_vol,avg_vol10d,beta,ccy,day_high,day_low,div_rate,div_yield%,ex_div,mktcap,open,payout%,pe_fwd,pe_ttm,prev_close,ps_ttm,vol
+base: sym
+```
 
 ## Install
 
@@ -179,5 +216,5 @@ If no path argument is provided, `wl` loads from `$WL_HOME/watchlist`.
 
 - Columns are resolved case-insensitively and support aliases (e.g., `div` = `div_rate`, `div%` = `div_yield%`).
 - Network access is required to fetch data at render time.
-- The screenshot above is referenced at `docs/screenshot.png`.
+- The screenshot above is referenced at `refs/screenshot.png`.
 
