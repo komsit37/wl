@@ -116,8 +116,8 @@ func registerMeta() {
 	// SummaryDetail
 	RegisterDef(ColumnDef{Key: "mktcap", Aliases: []string{"marketcap", "MarketCap", "market_cap"}, Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.marketCap.fmt|price.marketCap.fmt"})
 	RegisterDef(ColumnDef{Key: "beta", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.beta.fmt"})
-	RegisterDef(ColumnDef{Key: "div_yield%", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.dividendYield.fmt"})
-	RegisterDef(ColumnDef{Key: "div_rate", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.dividendRate.fmt"})
+	RegisterDef(ColumnDef{Key: "div_yield%", Aliases: []string{"div%"}, Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.dividendYield.fmt"})
+	RegisterDef(ColumnDef{Key: "div_rate", Aliases: []string{"div"}, Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.dividendRate.fmt"})
 	RegisterDef(ColumnDef{Key: "payout%", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.payoutRatio.fmt"})
 	RegisterDef(ColumnDef{Key: "pe_ttm", Aliases: []string{"pe"}, Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.trailingPE.fmt"})
 	RegisterDef(ColumnDef{Key: "pe_fwd", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.forwardPE.fmt"})
@@ -138,10 +138,6 @@ func registerMeta() {
 	RegisterDef(ColumnDef{Key: "ex_div", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.exDividendDate.fmt"})
 	RegisterDef(ColumnDef{Key: "5y_avg_div_yield", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.fiveYearAvgDividendYield.fmt"})
 	RegisterDef(ColumnDef{Key: "ccy", Module: yfgo.ModuleSummaryDetail, Path: "summaryDetail.currency.fmt"})
-
-	// Extra aliases
-	RegisterDef(ColumnDef{Key: "div_rate", Module: yfgo.ModuleSummaryDetail, Aliases: []string{"div"}})
-	RegisterDef(ColumnDef{Key: "div_yield%", Module: yfgo.ModuleSummaryDetail, Aliases: []string{"div%"}})
 }
 
 func init() {
