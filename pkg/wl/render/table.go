@@ -47,24 +47,8 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 		}
 		tw.AppendHeader(hdr)
 
-		// Column configs: wrap text to MaxColWidth (default 40), no truncation
-		maxWidth := opts.MaxColWidth
-		if maxWidth <= 0 {
-			maxWidth = 40
-		}
-		cfgs := make([]table.ColumnConfig, 0, len(cols))
-		for i, c := range cols {
-			cfg := table.ColumnConfig{Number: i + 1, WidthMax: maxWidth}
-			switch c {
-			case "employees", "officers_count", "avg_officer_age":
-				cfg.Align = text.AlignRight
-				cfg.AlignHeader = text.AlignRight
-			}
-			cfgs = append(cfgs, cfg)
-		}
-		if len(cfgs) > 0 {
-			tw.SetColumnConfigs(cfgs)
-		}
+		// We'll compute dynamic per-column alignment after gathering row values.
+		// Then we set the ColumnConfigs before appending rows.
 
 		// Pre-fetch and compute sort keys
 		type rowData struct {
@@ -139,27 +123,73 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 			})
 		}
 
-		// Render rows
-		for _, rdata := range rows {
+		// Build matrix of row cells and track numeric vs text for dynamic alignment.
+		// We'll decide to right-align a column if its displayed non-empty values
+		// are predominantly numeric-like (numbers, percents, K/M/B/T).
+		type colStat struct{ nums, texts int }
+		stats := make([]colStat, len(cols))
+		cells := make([][]string, len(rows))
+		for ri, rdata := range rows {
 			it, m := rdata.it, rdata.raw
-			row := make(table.Row, len(cols))
-			for i, c := range cols {
+			line := make([]string, len(cols))
+			for ci, c := range cols {
 				key := c
 				if k, ok := columns.Canonical(c); ok {
 					key = k
 				}
-				row[i] = renderFromRaw(key, it, m)
-				// Colorize for price and chg%
+				val := strings.TrimSpace(renderFromRaw(key, it, m))
+				line[ci] = val
+				if val != "" {
+					if _, ok := parseFormattedNumber(val); ok {
+						stats[ci].nums++
+					} else {
+						stats[ci].texts++
+					}
+				}
+			}
+			cells[ri] = line
+		}
+
+		// Column configs: wrap text to MaxColWidth (default 40), no truncation.
+		maxWidth := opts.MaxColWidth
+		if maxWidth <= 0 {
+			maxWidth = 40
+		}
+		cfgs := make([]table.ColumnConfig, 0, len(cols))
+		for i := range cols {
+			cfg := table.ColumnConfig{Number: i + 1, WidthMax: maxWidth}
+			// Decide alignment: right-align if numerics dominate among non-empty cells.
+			if stats[i].nums > 0 && stats[i].nums >= stats[i].texts {
+				cfg.Align = text.AlignRight
+				cfg.AlignHeader = text.AlignRight
+			}
+			cfgs = append(cfgs, cfg)
+		}
+		if len(cfgs) > 0 {
+			tw.SetColumnConfigs(cfgs)
+		}
+
+		// Render rows, applying color where applicable.
+		for ri, rdata := range rows {
+			m := rdata.raw
+			row := make(table.Row, len(cols))
+			for ci, c := range cols {
+				key := c
+				if k, ok := columns.Canonical(c); ok {
+					key = k
+				}
+				val := cells[ri][ci]
+				cell := any(val)
 				if opts.Color && (key == "price" || key == "chg%") {
-					// read raw change percent
 					if v, ok := columns.Extract(m, "price.regularMarketChangePercent.raw"); ok {
-						if strings.HasPrefix(v, "-") { // negative
-							row[i] = text.Colors{text.FgRed}.Sprintf("%v", row[i])
-						} else if v != "" && v != "0" && v != "0.0" && v != "0.00" { // positive
-							row[i] = text.Colors{text.FgGreen}.Sprintf("%v", row[i])
+						if strings.HasPrefix(v, "-") {
+							cell = text.Colors{text.FgRed}.Sprintf("%v", val)
+						} else if v != "" && v != "0" && v != "0.0" && v != "0.00" {
+							cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
 						}
 					}
 				}
+				row[ci] = cell
 			}
 			tw.AppendRow(row)
 		}
@@ -449,6 +479,7 @@ func filterNonEmpty(parts []string) []string {
 	}
 	return out
 }
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -457,6 +488,7 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
 func hostOnly(u string) string {
 	if u == "" {
 		return ""
