@@ -180,19 +180,48 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 				}
 				val := cells[ri][ci]
 				cell := any(val)
-				if opts.Color && (key == "price" || key == "chg%") {
-					if v, ok := columns.Extract(m, "price.regularMarketChangePercent.raw"); ok {
-						if strings.HasPrefix(v, "-") {
-							cell = text.Colors{text.FgRed}.Sprintf("%v", val)
-						} else if v != "" && v != "0" && v != "0.0" && v != "0.00" {
-							cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
-						}
-					}
-				}
-				row[ci] = cell
-			}
-			tw.AppendRow(row)
-		}
+                if opts.Color && (key == "price" || key == "chg%") {
+                    if v, ok := columns.Extract(m, "price.regularMarketChangePercent.raw"); ok {
+                        if strings.HasPrefix(v, "-") {
+                            cell = text.Colors{text.FgRed}.Sprintf("%v", val)
+                        } else if v != "" && v != "0" && v != "0.0" && v != "0.00" {
+                            cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
+                        }
+                    }
+                } else if opts.Color && (key == "rev_g%" || key == "earn_g%" || key == "fcf" || key == "ocf") {
+                    // Colorize based on sign of the raw value when available; else parse formatted display.
+                    colored := false
+                    if def, ok := columns.GetDef(key); ok {
+                        rawPath := def.Path
+                        if strings.Contains(rawPath, ".fmt") {
+                            rawPath = strings.Replace(rawPath, ".fmt", ".raw", 1)
+                        }
+                        if v, ok := columns.Extract(m, rawPath); ok {
+                            if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+                                if f < 0 {
+                                    cell = text.Colors{text.FgRed}.Sprintf("%v", val)
+                                    colored = true
+                                } else if f > 0 {
+                                    cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
+                                    colored = true
+                                }
+                            }
+                        }
+                    }
+                    if !colored {
+                        if f, ok := parseFormattedNumber(val); ok {
+                            if f < 0 {
+                                cell = text.Colors{text.FgRed}.Sprintf("%v", val)
+                            } else if f > 0 {
+                                cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
+                            }
+                        }
+                    }
+                }
+                row[ci] = cell
+            }
+            tw.AppendRow(row)
+        }
 
 		tw.Render()
 		if li < len(lists)-1 {
