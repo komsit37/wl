@@ -8,6 +8,7 @@ A small CLI tool to render stock watchlists from YAML files. It fetches quotes a
 
 - Fragmentation: I keep watchlists across multiple tools; syncing them is painful.
 - Files > forms: a local YAML file is faster to edit and easy to version.
+- Version‑controlled: keep a short thesis with each symbol, commit to Git, and view the thesis history.
 - Terminal‑first: faster, more organized, and AI‑context friendly.
 - Tool gaps: TradingView isn’t customizable, TIKR feels slow, and Koyfin often lacks up‑to‑date prices for Japanese stocks.
 
@@ -217,4 +218,3 @@ If no path argument is provided, `wl` loads from `$WL_HOME/watchlist`.
 - Columns are resolved case-insensitively and support aliases (e.g., `div` = `div_rate`, `div%` = `div_yield%`).
 - Network access is required to fetch data at render time.
 - The screenshot above is referenced at `refs/screenshot.png`.
-
