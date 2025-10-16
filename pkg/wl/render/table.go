@@ -2,10 +2,8 @@ package render
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -137,7 +135,14 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 				if k, ok := columns.Canonical(c); ok {
 					key = k
 				}
-				val := strings.TrimSpace(renderFromRaw(key, it, m))
+				// If column has a custom renderer, use it; else default renderFromRaw.
+				var val string
+				if def, ok := columns.GetDef(key); ok && def.Render != nil {
+					ctx := columns.CellContext{Key: key, Item: it, Raw: m}
+					val = strings.TrimSpace(def.Render(ctx))
+				} else {
+					val = strings.TrimSpace(renderFromRaw(key, it, m))
+				}
 				line[ci] = val
 				if val != "" {
 					if _, ok := parseFormattedNumber(val); ok {
@@ -158,10 +163,43 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 		cfgs := make([]table.ColumnConfig, 0, len(cols))
 		for i := range cols {
 			cfg := table.ColumnConfig{Number: i + 1, WidthMax: maxWidth}
-			// Decide alignment: right-align if numerics dominate among non-empty cells.
-			if stats[i].nums > 0 && stats[i].nums >= stats[i].texts {
-				cfg.Align = text.AlignRight
-				cfg.AlignHeader = text.AlignRight
+			// Respect explicit per-column alignment if provided in ColumnDef
+			if def, ok := columns.GetDef(cols[i]); ok {
+				switch def.Align {
+				case columns.AlignLeft:
+					cfg.Align = text.AlignLeft
+					cfg.AlignHeader = text.AlignLeft
+				case columns.AlignCenter:
+					cfg.Align = text.AlignCenter
+					cfg.AlignHeader = text.AlignCenter
+				case columns.AlignRight:
+					cfg.Align = text.AlignRight
+					cfg.AlignHeader = text.AlignRight
+				}
+			} else {
+				// Attempt canonical lookup then
+				if k, ok := columns.Canonical(cols[i]); ok {
+					if def, ok := columns.GetDef(k); ok {
+						switch def.Align {
+						case columns.AlignLeft:
+							cfg.Align = text.AlignLeft
+							cfg.AlignHeader = text.AlignLeft
+						case columns.AlignCenter:
+							cfg.Align = text.AlignCenter
+							cfg.AlignHeader = text.AlignCenter
+						case columns.AlignRight:
+							cfg.Align = text.AlignRight
+							cfg.AlignHeader = text.AlignRight
+						}
+					}
+				}
+			}
+			// If no explicit align set, decide alignment: right-align if numerics dominate among non-empty cells.
+			if cfg.Align == text.AlignDefault {
+				if stats[i].nums > 0 && stats[i].nums >= stats[i].texts {
+					cfg.Align = text.AlignRight
+					cfg.AlignHeader = text.AlignRight
+				}
 			}
 			cfgs = append(cfgs, cfg)
 		}
@@ -180,48 +218,24 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 				}
 				val := cells[ri][ci]
 				cell := any(val)
-                if opts.Color && (key == "price" || key == "chg%") {
-                    if v, ok := columns.Extract(m, "price.regularMarketChangePercent.raw"); ok {
-                        if strings.HasPrefix(v, "-") {
-                            cell = text.Colors{text.FgRed}.Sprintf("%v", val)
-                        } else if v != "" && v != "0" && v != "0.0" && v != "0.00" {
-                            cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
-                        }
-                    }
-                } else if opts.Color && (key == "rev_g%" || key == "earn_g%" || key == "fcf" || key == "ocf") {
-                    // Colorize based on sign of the raw value when available; else parse formatted display.
-                    colored := false
-                    if def, ok := columns.GetDef(key); ok {
-                        rawPath := def.Path
-                        if strings.Contains(rawPath, ".fmt") {
-                            rawPath = strings.Replace(rawPath, ".fmt", ".raw", 1)
-                        }
-                        if v, ok := columns.Extract(m, rawPath); ok {
-                            if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
-                                if f < 0 {
-                                    cell = text.Colors{text.FgRed}.Sprintf("%v", val)
-                                    colored = true
-                                } else if f > 0 {
-                                    cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
-                                    colored = true
-                                }
-                            }
-                        }
-                    }
-                    if !colored {
-                        if f, ok := parseFormattedNumber(val); ok {
-                            if f < 0 {
-                                cell = text.Colors{text.FgRed}.Sprintf("%v", val)
-                            } else if f > 0 {
-                                cell = text.Colors{text.FgGreen}.Sprintf("%v", val)
-                            }
-                        }
-                    }
-                }
-                row[ci] = cell
-            }
-            tw.AppendRow(row)
-        }
+				// Apply per-column Style if defined
+				if opts.Color {
+					if def, ok := columns.GetDef(key); ok && def.Style != nil {
+						var numPtr *float64
+						if f, ok := parseFormattedNumber(val); ok {
+							numPtr = &f
+						}
+						ctx := columns.CellContext{Key: key, Item: rdata.it, Raw: m, Display: val, Numeric: numPtr}
+						st := def.Style(ctx)
+						if styled := styleWithTextColors(val, st); styled != nil {
+							cell = styled
+						}
+					}
+				}
+				row[ci] = cell
+			}
+			tw.AppendRow(row)
+		}
 
 		tw.Render()
 		if li < len(lists)-1 {
@@ -232,8 +246,49 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 	return nil
 }
 
+// styleWithTextColors maps columns.CellStyle to go-pretty text.Colors and returns a formatted Sprintf wrapper.
+func styleWithTextColors(val string, st columns.CellStyle) any {
+	var colors []text.Color
+	switch st.FgColor {
+	case columns.ColorRed:
+		colors = append(colors, text.FgRed)
+	case columns.ColorGreen:
+		colors = append(colors, text.FgGreen)
+	case columns.ColorYellow:
+		colors = append(colors, text.FgYellow)
+	case columns.ColorBlue:
+		colors = append(colors, text.FgBlue)
+	case columns.ColorMagenta:
+		colors = append(colors, text.FgMagenta)
+	case columns.ColorCyan:
+		colors = append(colors, text.FgCyan)
+	}
+	switch st.BgColor {
+	case columns.ColorRed:
+		colors = append(colors, text.BgRed)
+	case columns.ColorGreen:
+		colors = append(colors, text.BgGreen)
+	case columns.ColorYellow:
+		colors = append(colors, text.BgYellow)
+	case columns.ColorBlue:
+		colors = append(colors, text.BgBlue)
+	case columns.ColorMagenta:
+		colors = append(colors, text.BgMagenta)
+	case columns.ColorCyan:
+		colors = append(colors, text.BgCyan)
+	}
+	if len(colors) == 0 {
+		return nil
+	}
+	return text.Colors(colors).Sprintf("%v", val)
+}
+
 // renderFromRaw extracts a value for a canonical key from raw map, with fallbacks.
 func renderFromRaw(key string, it types.Item, m map[string]any) string {
+	if def, ok := columns.GetDef(key); ok && def.Render != nil {
+		ctx := columns.CellContext{Key: key, Item: it, Raw: m}
+		return def.Render(ctx)
+	}
 	switch key {
 	case "sym":
 		return it.Sym
@@ -245,12 +300,6 @@ func renderFromRaw(key string, it types.Item, m map[string]any) string {
 			return v
 		}
 		return ""
-	case "avg_officer_age":
-		return avgOfficerAge(m)
-	case "hq":
-		return hqFromRaw(m)
-	case "ceo":
-		return ceoFromRaw(m)
 	default:
 		// 1) Built-in/YF-backed columns via registered path
 		if def, ok := columns.GetDef(key); ok && strings.TrimSpace(def.Path) != "" {
@@ -401,135 +450,4 @@ func parseFormattedNumber(s string) (float64, bool) {
 		// Do not convert to fraction; sorting by displayed percent is expected
 	}
 	return f * mult, true
-}
-
-func avgOfficerAge(m map[string]any) string {
-	v, _ := columns.Extract(m, "assetProfile.companyOfficers")
-	// direct extraction returns JSON; parse array
-	var arr []map[string]any
-	if b := []byte(v); len(b) > 0 && b[0] == '[' {
-		_ = json.Unmarshal(b, &arr)
-	}
-	if len(arr) == 0 {
-		return ""
-	}
-	var sum float64
-	var cnt int
-	for _, o := range arr {
-		if a, ok := o["age"]; ok {
-			switch t := a.(type) {
-			case float64:
-				sum += t
-				cnt++
-			case json.Number:
-				if f, err := t.Float64(); err == nil {
-					sum += f
-					cnt++
-				}
-			}
-		}
-	}
-	if cnt == 0 {
-		return ""
-	}
-	avg := sum / float64(cnt)
-	return columns.FormatFloat(avg, 1)
-}
-
-func hqFromRaw(m map[string]any) string {
-	city, _ := columns.Extract(m, "assetProfile.city")
-	country, _ := columns.Extract(m, "assetProfile.country")
-	phone, _ := columns.Extract(m, "assetProfile.phone")
-	ir, _ := columns.Extract(m, "assetProfile.irWebsite")
-	web, _ := columns.Extract(m, "assetProfile.website")
-	// Join city and country with proper separators and trim spaces
-	loc := strings.TrimSpace(strings.Join(filterNonEmpty([]string{city, country}), ", "))
-	parts := make([]string, 0, 3)
-	if loc != "" {
-		parts = append(parts, loc)
-	}
-	if phone != "" {
-		parts = append(parts, phone)
-	}
-	host := hostOnly(firstNonEmpty(ir, web))
-	if host != "" {
-		parts = append(parts, host)
-	}
-	return strings.Join(parts, " · ")
-}
-
-func ceoFromRaw(m map[string]any) string {
-	// parse officers and choose best by title
-	v, _ := columns.Extract(m, "assetProfile.companyOfficers")
-	var arr []map[string]any
-	if b := []byte(v); len(b) > 0 && b[0] == '[' {
-		_ = json.Unmarshal(b, &arr)
-	}
-	if len(arr) == 0 {
-		return ""
-	}
-	bestIdx := -1
-	for i, o := range arr {
-		title, _ := o["title"].(string)
-		lt := strings.ToLower(title)
-		if strings.Contains(lt, "ceo") || strings.Contains(lt, "president") || strings.Contains(lt, "representative director") {
-			bestIdx = i
-			break
-		}
-	}
-	if bestIdx == -1 {
-		bestIdx = 0
-	}
-	o := arr[bestIdx]
-	name, _ := o["name"].(string)
-	title, _ := o["title"].(string)
-	var ageStr string
-	if age, ok := o["age"]; ok {
-		ageStr = fmt.Sprint(age)
-		if ageStr != "" {
-			ageStr = " (" + ageStr + ")"
-		}
-	}
-	base := strings.TrimSpace(strings.Join(filterNonEmpty([]string{name}), " "))
-	if title != "" {
-		base = strings.TrimSpace(base + " — " + title)
-	}
-	return base + ageStr
-}
-
-// Utilities copied locally to avoid export churn
-func filterNonEmpty(parts []string) []string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		t := strings.TrimSpace(p)
-		if t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
-}
-
-func hostOnly(u string) string {
-	if u == "" {
-		return ""
-	}
-	parsed, err := url.Parse(u)
-	if err != nil || parsed.Host == "" {
-		if strings.Contains(u, "/") {
-			return strings.TrimSpace(u)
-		}
-		return strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
-	}
-	h := parsed.Host
-	h = strings.TrimPrefix(h, "www.")
-	return h
 }

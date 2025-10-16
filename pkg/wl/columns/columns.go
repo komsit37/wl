@@ -3,6 +3,7 @@ package columns
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,12 +19,58 @@ type ColumnDef struct {
 	Aliases []string
 	Module  yfgo.QuoteSummaryModule
 	Path    string // dot path with '|' fallbacks, terminal len() for arrays
+
+	// Styling/formatting hooks
+	Align  Align                           // explicit align; if AlignAuto, renderer may apply heuristics
+	Render func(ctx CellContext) string    // custom renderer; if nil, use Path/YAML fallback
+	Style  func(ctx CellContext) CellStyle // dynamic per-cell style; if nil, no styling
 }
 
 var (
 	defsByKey  = map[string]ColumnDef{}
 	aliasToKey = map[string]string{}
 )
+
+// Align is a renderer-agnostic alignment enum.
+type Align int
+
+const (
+	AlignAuto Align = iota
+	AlignLeft
+	AlignCenter
+	AlignRight
+)
+
+// Color is a minimal terminal color enum for foreground/background.
+type Color int
+
+const (
+	ColorNone Color = iota
+	ColorRed
+	ColorGreen
+	ColorYellow
+	ColorBlue
+	ColorMagenta
+	ColorCyan
+)
+
+// CellStyle describes how to style a cell.
+type CellStyle struct {
+	FgColor Color
+	BgColor Color
+	Bold    bool
+	Faint   bool
+}
+
+// CellContext gives render/style funcs access to the row/cell data.
+type CellContext struct {
+	Key     string         // canonical key
+	Item    types.Item     // YAML item
+	Raw     map[string]any // Yahoo raw map (Extract-able)
+	Display string         // display string computed so far (may be empty)
+	RawPath string         // raw path related to Path (e.g., .fmt -> .raw)
+	Numeric *float64       // parsed numeric if available
+}
 
 // RegisterDef registers a column definition and its aliases.
 func RegisterDef(def ColumnDef) {
@@ -69,12 +116,16 @@ func AvailableByModule() map[string][]string {
 // registerMeta defines all built-in columns in one place.
 func registerMeta() {
 	// Base
-	RegisterDef(ColumnDef{Key: "sym"})
-	RegisterDef(ColumnDef{Key: "name", Module: yfgo.ModulePrice, Path: "price.shortName|price.longName"})
+	RegisterDef(ColumnDef{Key: "sym", Align: AlignLeft})
+	RegisterDef(ColumnDef{Key: "name", Module: yfgo.ModulePrice, Path: "price.shortName|price.longName", Align: AlignLeft})
 
 	// Price
-	RegisterDef(ColumnDef{Key: "price", Module: yfgo.ModulePrice, Path: "price.regularMarketPrice.fmt"})
-	RegisterDef(ColumnDef{Key: "chg%", Module: yfgo.ModulePrice, Path: "price.regularMarketChangePercent.fmt"})
+	RegisterDef(ColumnDef{Key: "price", Module: yfgo.ModulePrice, Path: "price.regularMarketPrice.fmt",
+		Style: ColorBySign("price.regularMarketChangePercent.raw"),
+	})
+	RegisterDef(ColumnDef{Key: "chg%", Module: yfgo.ModulePrice, Path: "price.regularMarketChangePercent.fmt",
+		Style: ColorBySign("price.regularMarketChangePercent.raw"),
+	})
 
 	// AssetProfile
 	RegisterDef(ColumnDef{Key: "sector", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.sector"})
@@ -83,10 +134,10 @@ func registerMeta() {
 	RegisterDef(ColumnDef{Key: "website", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.website"})
 	RegisterDef(ColumnDef{Key: "ir", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.irWebsite"})
 	RegisterDef(ColumnDef{Key: "officers_count", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.companyOfficers.len()"})
-	RegisterDef(ColumnDef{Key: "avg_officer_age", Module: yfgo.ModuleAssetProfile}) // derived
+	RegisterDef(ColumnDef{Key: "avg_officer_age", Module: yfgo.ModuleAssetProfile, Render: renderAvgOfficerAge}) // derived
 	RegisterDef(ColumnDef{Key: "business_summary", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.longBusinessSummary"})
-	RegisterDef(ColumnDef{Key: "hq", Module: yfgo.ModuleAssetProfile})  // derived
-	RegisterDef(ColumnDef{Key: "ceo", Module: yfgo.ModuleAssetProfile}) // derived
+	RegisterDef(ColumnDef{Key: "hq", Module: yfgo.ModuleAssetProfile, Render: renderHQ})   // derived
+	RegisterDef(ColumnDef{Key: "ceo", Module: yfgo.ModuleAssetProfile, Render: renderCEO}) // derived
 	RegisterDef(ColumnDef{Key: "address1", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.address1"})
 	RegisterDef(ColumnDef{Key: "city", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.city"})
 	RegisterDef(ColumnDef{Key: "zip", Module: yfgo.ModuleAssetProfile, Path: "assetProfile.zip"})
@@ -102,13 +153,21 @@ func registerMeta() {
 	RegisterDef(ColumnDef{Key: "pm%", Module: yfgo.ModuleFinancialData, Path: "financialData.profitMargins.fmt"})
 	RegisterDef(ColumnDef{Key: "om%", Module: yfgo.ModuleFinancialData, Path: "financialData.operatingMargins.fmt"})
 	RegisterDef(ColumnDef{Key: "gm%", Module: yfgo.ModuleFinancialData, Path: "financialData.grossMargins.fmt"})
-	RegisterDef(ColumnDef{Key: "rev_g%", Module: yfgo.ModuleFinancialData, Path: "financialData.revenueGrowth.fmt"})
-	RegisterDef(ColumnDef{Key: "earn_g%", Module: yfgo.ModuleFinancialData, Path: "financialData.earningsGrowth.fmt"})
+	RegisterDef(ColumnDef{Key: "rev_g%", Module: yfgo.ModuleFinancialData, Path: "financialData.revenueGrowth.fmt",
+		Style: ColorBySign("financialData.revenueGrowth.raw"),
+	})
+	RegisterDef(ColumnDef{Key: "earn_g%", Module: yfgo.ModuleFinancialData, Path: "financialData.earningsGrowth.fmt",
+		Style: ColorBySign("financialData.earningsGrowth.raw"),
+	})
 	RegisterDef(ColumnDef{Key: "rev_ps", Module: yfgo.ModuleFinancialData, Path: "financialData.revenuePerShare.fmt"})
 	RegisterDef(ColumnDef{Key: "cash", Module: yfgo.ModuleFinancialData, Path: "financialData.totalCash.fmt"})
 	RegisterDef(ColumnDef{Key: "debt", Module: yfgo.ModuleFinancialData, Path: "financialData.totalDebt.fmt"})
-	RegisterDef(ColumnDef{Key: "fcf", Module: yfgo.ModuleFinancialData, Path: "financialData.freeCashflow.fmt"})
-	RegisterDef(ColumnDef{Key: "ocf", Module: yfgo.ModuleFinancialData, Path: "financialData.operatingCashflow.fmt"})
+	RegisterDef(ColumnDef{Key: "fcf", Module: yfgo.ModuleFinancialData, Path: "financialData.freeCashflow.fmt",
+		Style: ColorBySign("financialData.freeCashflow.raw"),
+	})
+	RegisterDef(ColumnDef{Key: "ocf", Module: yfgo.ModuleFinancialData, Path: "financialData.operatingCashflow.fmt",
+		Style: ColorBySign("financialData.operatingCashflow.raw"),
+	})
 	RegisterDef(ColumnDef{Key: "tgt_mean", Module: yfgo.ModuleFinancialData, Path: "financialData.targetMeanPrice.fmt"})
 	RegisterDef(ColumnDef{Key: "reco", Module: yfgo.ModuleFinancialData, Path: "financialData.recommendationKey"})
 	RegisterDef(ColumnDef{Key: "analysts", Module: yfgo.ModuleFinancialData, Path: "financialData.numberOfAnalystOpinions.raw"})
@@ -167,6 +226,32 @@ func RawToMap(v any) map[string]any {
 		return nil
 	}
 	return m
+}
+
+// ColorBySign returns a Style func that colors by numeric sign using a raw JSON path.
+// It prefers the raw value at rawPath; if unavailable, it uses ctx.Numeric when provided.
+func ColorBySign(rawPath string) func(ctx CellContext) CellStyle {
+	return func(ctx CellContext) CellStyle {
+		if strings.TrimSpace(rawPath) != "" && ctx.Raw != nil {
+			if v, ok := Extract(ctx.Raw, rawPath); ok {
+				if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+					if f < 0 {
+						return CellStyle{FgColor: ColorRed}
+					} else if f > 0 {
+						return CellStyle{FgColor: ColorGreen}
+					}
+				}
+			}
+		}
+		if ctx.Numeric != nil {
+			if *ctx.Numeric < 0 {
+				return CellStyle{FgColor: ColorRed}
+			} else if *ctx.Numeric > 0 {
+				return CellStyle{FgColor: ColorGreen}
+			}
+		}
+		return CellStyle{}
+	}
 }
 
 // Extract gets a string for a dot path with fallbacks separated by '|'.
@@ -378,4 +463,163 @@ func insertAfter(s []string, idx int, v string) []string {
 	copy(s[idx+2:], s[idx+1:])
 	s[idx+1] = v
 	return s
+}
+
+func renderAvgOfficerAge(ctx CellContext) string {
+	if ctx.Raw == nil {
+		return ""
+	}
+	val, ok := walkOnce(ctx.Raw, "assetProfile.companyOfficers")
+	if !ok {
+		return ""
+	}
+	arr, ok := val.([]any)
+	if !ok || len(arr) == 0 {
+		return ""
+	}
+	var sum float64
+	var cnt int
+	for _, elem := range arr {
+		m, ok := elem.(map[string]any)
+		if !ok {
+			continue
+		}
+		switch v := m["age"].(type) {
+		case float64:
+			sum += v
+			cnt++
+		case json.Number:
+			if f, err := v.Float64(); err == nil {
+				sum += f
+				cnt++
+			}
+		case string:
+			if f, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil {
+				sum += f
+				cnt++
+			}
+		}
+	}
+	if cnt == 0 {
+		return ""
+	}
+	return FormatFloat(sum/float64(cnt), 1)
+}
+
+func renderHQ(ctx CellContext) string {
+	city, _ := Extract(ctx.Raw, "assetProfile.city")
+	country, _ := Extract(ctx.Raw, "assetProfile.country")
+	phone, _ := Extract(ctx.Raw, "assetProfile.phone")
+	ir, _ := Extract(ctx.Raw, "assetProfile.irWebsite")
+	web, _ := Extract(ctx.Raw, "assetProfile.website")
+
+	loc := strings.TrimSpace(strings.Join(filterNonEmpty([]string{city, country}), ", "))
+	parts := make([]string, 0, 3)
+	if loc != "" {
+		parts = append(parts, loc)
+	}
+	if phone != "" {
+		parts = append(parts, phone)
+	}
+	if host := hostOnly(firstNonEmpty(ir, web)); host != "" {
+		parts = append(parts, host)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func renderCEO(ctx CellContext) string {
+	if ctx.Raw == nil {
+		return ""
+	}
+	val, ok := walkOnce(ctx.Raw, "assetProfile.companyOfficers")
+	if !ok {
+		return ""
+	}
+	arr, ok := val.([]any)
+	if !ok || len(arr) == 0 {
+		return ""
+	}
+	bestIdx := -1
+	for i, elem := range arr {
+		m, ok := elem.(map[string]any)
+		if !ok {
+			continue
+		}
+		title, _ := m["title"].(string)
+		lt := strings.ToLower(title)
+		if strings.Contains(lt, "ceo") || strings.Contains(lt, "president") || strings.Contains(lt, "representative director") {
+			bestIdx = i
+			break
+		}
+	}
+	if bestIdx == -1 {
+		bestIdx = 0
+	}
+	o, ok := arr[bestIdx].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := o["name"].(string)
+	title, _ := o["title"].(string)
+
+	var ageStr string
+	switch v := o["age"].(type) {
+	case float64:
+		ageStr = FormatFloat(v, 0)
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			ageStr = FormatFloat(f, 0)
+		}
+	case string:
+		s := strings.TrimSpace(v)
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			ageStr = FormatFloat(f, 0)
+		} else {
+			ageStr = s
+		}
+	}
+	if ageStr != "" {
+		ageStr = " (" + ageStr + ")"
+	}
+
+	base := strings.TrimSpace(strings.Join(filterNonEmpty([]string{name}), " "))
+	if title != "" {
+		base = strings.TrimSpace(base + " — " + title)
+	}
+	return base + ageStr
+}
+
+func filterNonEmpty(parts []string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		t := strings.TrimSpace(p)
+		if t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func hostOnly(u string) string {
+	if strings.TrimSpace(u) == "" {
+		return ""
+	}
+	parsed, err := url.Parse(u)
+	if err != nil || parsed.Host == "" {
+		if strings.Contains(u, "/") {
+			return strings.TrimSpace(u)
+		}
+		return strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://")
+	}
+	h := parsed.Host
+	return strings.TrimPrefix(h, "www.")
 }

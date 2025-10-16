@@ -25,22 +25,22 @@ import (
 // - relative (resolved against baseDir), or
 // - absolute (returned as-is after '~' expansion).
 func resolvePath(p string, baseDir string) string {
-    p = strings.TrimSpace(p)
-    if p == "" {
-        return p
-    }
-    if strings.HasPrefix(p, "~") {
-        if home, err := os.UserHomeDir(); err == nil {
-            p = filepath.Join(home, strings.TrimPrefix(p, "~"))
-        }
-    }
-    if filepath.IsAbs(p) {
-        return p
-    }
-    if baseDir == "" {
-        return p
-    }
-    return filepath.Join(baseDir, p)
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return p
+	}
+	if strings.HasPrefix(p, "~") {
+		if home, err := os.UserHomeDir(); err == nil {
+			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	if baseDir == "" {
+		return p
+	}
+	return filepath.Join(baseDir, p)
 }
 
 func main() {
@@ -440,7 +440,6 @@ func main() {
 			})
 		},
 	}
-
 
 	rootCmd.Flags().StringVar(&flagSource, "source", "yaml", "data source: yaml|db")
 	rootCmd.Flags().StringVar(&flagDBDSN, "db-dsn", "", "database DSN for db source")
