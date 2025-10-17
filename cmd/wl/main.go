@@ -49,8 +49,8 @@ func main() {
 		flagDBDSN       string
 		flagOutput      string
 		flagNoColor     bool
-		flagPrettyJSON  bool
-		flagColumns     string
+		flagPretty      bool
+		flagCols        string
 		flagColSet      string
 		flagConfigPath  string
 		flagFilter      string
@@ -77,7 +77,7 @@ func main() {
 		Short: "Render a watchlist",
 		Args: func(cmd *cobra.Command, args []string) error {
 			// Allow running with no args when listing columns
-			listCols, _ := cmd.Flags().GetBool("list-columns")
+			listCols, _ := cmd.Flags().GetBool("list-cols")
 			listColSets, _ := cmd.Flags().GetBool("list-col-sets")
 			if listCols || listColSets {
 				return nil
@@ -387,8 +387,8 @@ func main() {
 				cols = append(cols, expanded...)
 			}
 			// 2) Explicit columns: CLI flag takes precedence, else config columns
-			if strings.TrimSpace(flagColumns) != "" {
-				parts := strings.Split(flagColumns, ",")
+			if strings.TrimSpace(flagCols) != "" {
+				parts := strings.Split(flagCols, ",")
 				for _, p := range parts {
 					p = strings.TrimSpace(p)
 					if p != "" {
@@ -433,7 +433,7 @@ func main() {
 				Columns:     cols,
 				Filter:      f,
 				Color:       !flagNoColor,
-				PrettyJSON:  flagPrettyJSON,
+				PrettyJSON:  flagPretty,
 				MaxColWidth: flagMaxColWidth,
 				SortBy:      flagSortBy,
 				SortDesc:    flagSortDesc,
@@ -443,23 +443,19 @@ func main() {
 
 	rootCmd.Flags().StringVar(&flagSource, "source", "yaml", "data source: yaml|db")
 	rootCmd.Flags().StringVar(&flagDBDSN, "db-dsn", "", "database DSN for db source")
-	rootCmd.Flags().StringVar(&flagOutput, "output", "table", "output format: table|json")
+	rootCmd.Flags().StringVarP(&flagOutput, "output", "o", "table", "output format: table|json")
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
-	rootCmd.Flags().BoolVar(&flagPrettyJSON, "pretty-json", false, "pretty-print JSON output")
-	rootCmd.Flags().StringVar(&flagColumns, "columns", "", "comma-separated columns to display")
-	// Alias: --cols behaves the same as --columns
-	rootCmd.Flags().StringVar(&flagColumns, "cols", "", "alias of --columns")
-	rootCmd.Flags().StringVar(&flagColSet, "col-set", "", "comma-separated column sets: price,assetProfile,yaml")
+	rootCmd.Flags().BoolVarP(&flagPretty, "pretty", "p", false, "pretty-print JSON output")
+	rootCmd.Flags().StringVarP(&flagCols, "cols", "c", "", "comma-separated columns to display")
+	rootCmd.Flags().StringVarP(&flagColSet, "col-set", "C", "", "comma-separated column sets: price,assetProfile,yaml")
 	rootCmd.Flags().StringVar(&flagConfigPath, "config", "", "path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)")
-	rootCmd.Flags().StringVar(&flagFilter, "filter", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
+	rootCmd.Flags().StringVarP(&flagFilter, "filter", "f", "", "filter watchlists by name: substring (ci), name[,name...], glob, or /regex/")
 	rootCmd.Flags().BoolVar(&flagList, "list", false, "list watchlist names only")
-	rootCmd.Flags().BoolVar(&flagListColumns, "list-columns", false, "list available column names")
-	// Alias: --list-cols behaves the same as --list-columns
-	rootCmd.Flags().BoolVar(&flagListColumns, "list-cols", false, "alias of --list-columns")
-	rootCmd.Flags().BoolVar(&flagListColSets, "list-col-sets", false, "list column sets in compact form (built-in + config)")
+	rootCmd.Flags().BoolVarP(&flagListColumns, "list-cols", "l", false, "list available column names")
+	rootCmd.Flags().BoolVarP(&flagListColSets, "list-col-sets", "L", false, "list column sets in compact form (built-in + config)")
 	rootCmd.Flags().IntVar(&flagMaxColWidth, "max-col-width", 40, "max width per column before wrapping (characters)")
 	// Sorting
-	rootCmd.Flags().StringVar(&flagSortBy, "sort", "", "sort rows by column (handles text, numbers, formatted values, and chg%)")
+	rootCmd.Flags().StringVarP(&flagSortBy, "sort", "s", "", "sort rows by column (handles text, numbers, formatted values, and chg%)")
 	rootCmd.Flags().BoolVar(&flagSortDesc, "desc", false, "sort in descending order (default asc)")
 
 	if err := rootCmd.Execute(); err != nil {

@@ -31,7 +31,7 @@ watchlist:
   - sym: 7292.T
 ```
 
-- Customizable columns: choose explicit columns or sets; display any field from your YAML alongside many Yahoo‑backed columns. Discover columns with `--list-columns` (alias: `--list-cols`):
+- Customizable columns: choose explicit columns or sets; display any field from your YAML alongside many Yahoo‑backed columns. Discover columns with `-l` / `--list-cols`:
 
 ```bash
 go/wl » wl --list-cols
@@ -68,7 +68,7 @@ wl samples/nested.yaml --config samples/config.yaml --col-set "sym,overview"
 - List available columns and sets:
 
 ```
-wl --list-columns
+wl --list-cols
 wl --config samples/config.yaml --list-col-sets
 ```
 
@@ -87,23 +87,21 @@ Usage:
   wl [file|dir] [flags]
 
 Flags:
-      --col-set string      comma-separated column sets: price,assetProfile
-      --cols string         alias of --columns
-      --columns string      comma-separated columns to display
+  -C, --col-set string      comma-separated column sets: price,assetProfile
+  -c, --cols string         comma-separated columns to display
       --config string       path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)
       --db-dsn string       database DSN for db source
-      --filter string       filter watchlists by name: substring (ci), name[,name...], glob, or /regex/
+  -f, --filter string       filter watchlists by name: substring (ci), name[,name...], glob, or /regex/
   -h, --help                help for wl
       --list                list watchlist names only
-      --list-col-sets       list column sets in compact form (built-in + config)
-      --list-cols           alias of --list-columns
-      --list-columns        list available column names
+  -L, --list-col-sets       list column sets in compact form (built-in + config)
+  -l, --list-cols           list available column names
       --max-col-width int   max width per column before wrapping (characters) (default 40)
-      --sort string         sort rows by column (handles text, numbers, formatted values, and chg%)
       --desc                sort in descending order (default asc)
       --no-color            disable color output
-      --output string       output format: table|json (default "table")
-      --pretty-json         pretty-print JSON output
+  -o, --output string       output format: table|json (default "table")
+  -p, --pretty              pretty-print JSON output
+  -s, --sort string         sort rows by column (handles text, numbers, formatted values, and chg%)
       --source string       data source: yaml|db (default "yaml")
 ```
 
@@ -114,10 +112,10 @@ Use `--sort <column>` to sort table rows by a column. Sorting understands text, 
 Examples:
 
 ```
-wl <path> --columns "sym,name,price,chg%" --sort chg% --desc   # top gainers first
+wl <path> --cols "sym,name,price,chg%" --sort chg% --desc      # top gainers first
 wl <path> --col-set "sym,overview" --sort price                # lowest price first
-wl <path> --columns "sym,note,rank" --sort rank                # YAML field numeric
-wl <path> --columns "sym,note" --sort note                     # YAML field text
+wl <path> --cols "sym,note,rank" --sort rank                   # YAML field numeric
+wl <path> --cols "sym,note" --sort note                        # YAML field text
 ```
 
 ## YAML format
@@ -195,13 +193,13 @@ Use sets and/or explicit columns; sets expand first, then explicit columns appen
 wl <path> --config path/to/config.yaml --col-set "sym,overview,valuation"
 
 # Explicit columns override order or add fields
-wl <path> --columns "sym,name,price,chg%,sector,industry"
+wl <path> --cols "sym,name,price,chg%,sector,industry"
 ```
 
 List what’s available:
 
 ```
-wl --list-columns                      # group by data module
+wl --list-cols                         # group by data module
 wl --config <cfg> --list-col-sets      # built-in + your custom sets
 ```
 
@@ -218,7 +216,7 @@ wl <dir> --filter "/^watchlist\/tech$/"  # regex
 
 - Output formats:
   - `--output table` (default). Use `--no-color` to disable color and `--max-col-width` to wrap long text.
-  - `--output json` with `--pretty-json` for human-readable JSON.
+  - `--output json` with `--pretty` for human-readable JSON.
 
 ## Data sources and home directory
 
