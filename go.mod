@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/jedib0t/go-pretty/v6 v6.6.8
-	github.com/komsit37/yf-go v0.0.0-20251010114843-e8d6a26474eb
+	github.com/komsit37/yf-go v0.0.0-20251017084539-72379559587c
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.18.2
 	gopkg.in/yaml.v3 v3.0.1
