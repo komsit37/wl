@@ -90,6 +90,9 @@ Flags:
   -C, --col-set string      comma-separated column sets: price,assetProfile
   -c, --cols string         comma-separated columns to display
       --config string       path to config file (default: $WL_HOME/config.yaml or ~/.wl/config.yaml)
+      --cache-disable       disable Yahoo Finance client caching
+      --cache-dir string    use a directory for persistent Yahoo Finance cache entries
+      --cache-ttl duration  override Yahoo Finance cache TTL (e.g. 2m); 0 keeps library default
       --db-dsn string       database DSN for db source
   -f, --filter string       filter watchlists by name: substring (ci), name[,name...], glob, or /regex/
   -h, --help                help for wl
@@ -104,6 +107,29 @@ Flags:
   -s, --sort string         sort rows by column (handles text, numbers, formatted values, and chg%)
       --source string       data source: yaml|db (default "yaml")
 ```
+
+### Yahoo Finance caching
+
+`wl` uses the caching layer built into [`yf-go`](https://github.com/komsit37/yf-go). By default the client caches responses in memory for five minutes. You can customise or disable this behaviour via CLI flags or your config file.
+
+```
+# Disable caching entirely.
+wl watchlist.yaml --cache-disable
+
+# Use a 2 minute TTL backed by a file-based cache directory.
+wl watchlist.yaml --cache-dir ./cache --cache-ttl 2m
+```
+
+The same settings are available in `config.yaml`:
+
+```yaml
+cache:
+  ttl: 2m
+  dir: ./cache
+  disabled: false
+```
+
+Advanced users can override caching on individual calls by wrapping the context with `yfgo.WithCacheOptions`, e.g. `ctx := yfgo.WithCacheOptions(ctx, yfgo.CacheTTL(10*time.Second))`.
 
 ### Sorting
 
@@ -170,6 +196,10 @@ watchlist:
 Sample config (samples/config.yaml):
 
 ```yaml
+cache:
+  ttl: 2m
+  dir: ./cache
+
 col_sets:
   sym: [sym, name]
   overview: [price, chg%, sector, industry, mktcap, beta]

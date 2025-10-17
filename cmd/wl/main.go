@@ -7,11 +7,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
 	"github.com/jedib0t/go-pretty/v6/list"
+
+	yfgo "github.com/komsit37/yf-go"
 
 	"github.com/komsit37/wl/pkg/wl/columns"
 	"github.com/komsit37/wl/pkg/wl/filter"
@@ -45,21 +48,24 @@ func resolvePath(p string, baseDir string) string {
 
 func main() {
 	var (
-		flagSource      string
-		flagDBDSN       string
-		flagOutput      string
-		flagNoColor     bool
-		flagPretty      bool
-		flagCols        string
-		flagColSet      string
-		flagConfigPath  string
-		flagFilter      string
-		flagList        bool
-		flagListColumns bool
-		flagListColSets bool
-		flagMaxColWidth int
-		flagSortBy      string
-		flagSortDesc    bool
+		flagSource       string
+		flagDBDSN        string
+		flagOutput       string
+		flagNoColor      bool
+		flagPretty       bool
+		flagCols         string
+		flagColSet       string
+		flagConfigPath   string
+		flagFilter       string
+		flagList         bool
+		flagListColumns  bool
+		flagListColSets  bool
+		flagMaxColWidth  int
+		flagSortBy       string
+		flagSortDesc     bool
+		flagCacheDisable bool
+		flagCacheTTL     time.Duration
+		flagCacheDir     string
 	)
 
 	// AppConfig represents configuration loaded from Viper.
@@ -70,6 +76,11 @@ func main() {
 		// DefaultWatchlist sets the default watchlist path when no CLI path arg is provided.
 		// Can be absolute or relative (relative resolves against wlHome).
 		DefaultWatchlist string `mapstructure:"default_watchlist"`
+		Cache            struct {
+			Disabled bool   `mapstructure:"disabled"`
+			Dir      string `mapstructure:"dir"`
+			TTL      string `mapstructure:"ttl"`
+		} `mapstructure:"cache"`
 	}
 
 	rootCmd := &cobra.Command{
@@ -188,6 +199,43 @@ func main() {
 				return nil
 			}
 
+			// Cache configuration merges config defaults with CLI overrides.
+			cacheDisabled := cfg.Cache.Disabled
+			if cmd.Flags().Changed("cache-disable") {
+				cacheDisabled = flagCacheDisable
+			}
+
+			var (
+				cacheTTL     time.Duration
+				haveCacheTTL bool
+			)
+			if ttlStr := strings.TrimSpace(cfg.Cache.TTL); ttlStr != "" {
+				dur, err := time.ParseDuration(ttlStr)
+				if err != nil {
+					return fmt.Errorf("invalid cache.ttl in config: %w", err)
+				}
+				if dur <= 0 {
+					return fmt.Errorf("cache.ttl must be > 0 (got %s)", ttlStr)
+				}
+				cacheTTL = dur
+				haveCacheTTL = true
+			}
+			if cmd.Flags().Changed("cache-ttl") {
+				if flagCacheTTL <= 0 {
+					return errors.New("--cache-ttl must be greater than 0")
+				}
+				cacheTTL = flagCacheTTL
+				haveCacheTTL = true
+			}
+
+			cacheDir := ""
+			if dir := strings.TrimSpace(cfg.Cache.Dir); dir != "" {
+				cacheDir = resolvePath(dir, wlHome)
+			}
+			if cmd.Flags().Changed("cache-dir") {
+				cacheDir = resolvePath(flagCacheDir, wlHome)
+			}
+
 			// List column sets (built-in + config) in compact format and exit
 			if flagListColSets {
 				// Determine module sets vs custom sets (from config.yaml)
@@ -285,7 +333,23 @@ func main() {
 			var rnd render.Renderer
 			switch flagOutput {
 			case "table", "":
-				rnd = render.NewTableRenderer()
+				opts := make([]yfgo.ClientOption, 0, 3)
+				if cacheDisabled {
+					opts = append(opts, yfgo.WithCacheDisabled())
+				} else {
+					if cacheDir != "" {
+						store, err := yfgo.NewFileCacheStore(cacheDir)
+						if err != nil {
+							return fmt.Errorf("init cache store (%s): %w", cacheDir, err)
+						}
+						opts = append(opts, yfgo.WithCacheStore(store))
+					}
+					if haveCacheTTL {
+						opts = append(opts, yfgo.WithDefaultCacheTTL(cacheTTL))
+					}
+				}
+				client := yfgo.NewClient(opts...)
+				rnd = render.NewTableRendererWithClient(client)
 			case "json":
 				rnd = render.NewJSONRenderer()
 			default:
@@ -454,6 +518,9 @@ func main() {
 	rootCmd.Flags().BoolVarP(&flagListColumns, "list-cols", "l", false, "list available column names")
 	rootCmd.Flags().BoolVarP(&flagListColSets, "list-col-sets", "L", false, "list column sets in compact form (built-in + config)")
 	rootCmd.Flags().IntVar(&flagMaxColWidth, "max-col-width", 40, "max width per column before wrapping (characters)")
+	rootCmd.Flags().BoolVar(&flagCacheDisable, "cache-disable", false, "disable Yahoo Finance client caching")
+	rootCmd.Flags().DurationVar(&flagCacheTTL, "cache-ttl", 0, "override Yahoo Finance cache TTL (e.g. 2m); 0 keeps library default")
+	rootCmd.Flags().StringVar(&flagCacheDir, "cache-dir", "", "use a directory for persistent Yahoo Finance cache entries")
 	// Sorting
 	rootCmd.Flags().StringVarP(&flagSortBy, "sort", "s", "", "sort rows by column (handles text, numbers, formatted values, and chg%)")
 	rootCmd.Flags().BoolVar(&flagSortDesc, "desc", false, "sort in descending order (default asc)")

@@ -1,3 +1,8 @@
+cache:
+    ttl: 2m
+    dir: ./cache
+    # disabled: true
+
 col_sets:
     sym:
         - sym

@@ -19,7 +19,14 @@ import (
 
 type TableRenderer struct{ Client *yfgo.Client }
 
-func NewTableRenderer() *TableRenderer { return &TableRenderer{Client: yfgo.NewClient()} }
+func NewTableRenderer() *TableRenderer { return NewTableRendererWithClient(nil) }
+
+func NewTableRendererWithClient(client *yfgo.Client) *TableRenderer {
+	if client == nil {
+		client = yfgo.NewClient()
+	}
+	return &TableRenderer{Client: client}
+}
 
 func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts RenderOptions) error {
 	multi := len(lists) > 1
