@@ -488,6 +488,7 @@ func main() {
 			}
 
 			// Runner
+			termWidth := detectTerminalWidth()
 			run := &pipeline.Runner{
 				Source:   src,
 				Renderer: rnd,
@@ -499,6 +500,7 @@ func main() {
 				Color:       !flagNoColor,
 				PrettyJSON:  flagPretty,
 				MaxColWidth: flagMaxColWidth,
+				TermWidth:   termWidth,
 				SortBy:      flagSortBy,
 				SortDesc:    flagSortDesc,
 			})

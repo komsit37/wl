@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
+	"github.com/mattn/go-runewidth"
 
 	yfgo "github.com/komsit37/yf-go"
 
@@ -29,17 +31,28 @@ func NewTableRendererWithClient(client *yfgo.Client) *TableRenderer {
 }
 
 func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts RenderOptions) error {
+	if len(lists) == 0 {
+		return nil
+	}
+	const columnGap = 4
+	gapStr := strings.Repeat(" ", columnGap)
 	multi := len(lists) > 1
-	for li, list := range lists {
+	type renderedBlock struct {
+		lines []string
+		width int
+	}
+	blocks := make([]renderedBlock, 0, len(lists))
+	maxBlockWidth := 0
+
+	for _, list := range lists {
 		cols := list.Columns
 
-		// Print watchlist name as a standalone line spanning full width
+		var nameLine string
 		if multi && strings.TrimSpace(list.Name) != "" {
-			fmt.Fprintln(w, text.Bold.Sprint(strings.ToUpper(list.Name)))
+			nameLine = text.Bold.Sprint(strings.ToUpper(list.Name))
 		}
 
 		tw := table.NewWriter()
-		tw.SetOutputMirror(w)
 		tw.SetStyle(table.StyleColoredDark)
 		tw.Style().Options.DrawBorder = false
 		tw.Style().Options.SeparateRows = false
@@ -244,13 +257,96 @@ func (r *TableRenderer) Render(w io.Writer, lists []types.Watchlist, opts Render
 			tw.AppendRow(row)
 		}
 
-		tw.Render()
-		if li < len(lists)-1 {
-			// blank line between tables
+		rendered := strings.TrimRight(tw.Render(), "\n")
+		lines := make([]string, 0, len(cols)+len(rows)+1)
+		if nameLine != "" {
+			lines = append(lines, nameLine)
+		}
+		if rendered != "" {
+			lines = append(lines, strings.Split(rendered, "\n")...)
+		}
+		blockWidth := 0
+		for _, line := range lines {
+			if w := visibleWidth(line); w > blockWidth {
+				blockWidth = w
+			}
+		}
+		blocks = append(blocks, renderedBlock{lines: lines, width: blockWidth})
+		if blockWidth > maxBlockWidth {
+			maxBlockWidth = blockWidth
+		}
+	}
+
+	columnCount := 1
+	if opts.TermWidth > 0 && maxBlockWidth > 0 && len(blocks) > 1 {
+		if opts.TermWidth > maxBlockWidth*3 {
+			columnCount = 3
+		} else if opts.TermWidth > maxBlockWidth*2 {
+			columnCount = 2
+		}
+		for columnCount > 1 {
+			required := columnCount*maxBlockWidth + (columnCount-1)*columnGap
+			if required <= opts.TermWidth {
+				break
+			}
+			columnCount--
+		}
+	}
+
+	if columnCount == 1 {
+		for i, block := range blocks {
+			for _, line := range block.lines {
+				fmt.Fprintln(w, line)
+			}
+			if i < len(blocks)-1 {
+				fmt.Fprintln(w)
+			}
+		}
+		return nil
+	}
+
+	for i := 0; i < len(blocks); i += columnCount {
+		end := i + columnCount
+		if end > len(blocks) {
+			end = len(blocks)
+		}
+		group := blocks[i:end]
+		height := 0
+		for _, block := range group {
+			if len(block.lines) > height {
+				height = len(block.lines)
+			}
+		}
+		for rowIdx := 0; rowIdx < height; rowIdx++ {
+			parts := make([]string, len(group))
+			for ci, block := range group {
+				var line string
+				if rowIdx < len(block.lines) {
+					line = block.lines[rowIdx]
+				}
+				padding := block.width - visibleWidth(line)
+				if padding > 0 {
+					line += strings.Repeat(" ", padding)
+				}
+				parts[ci] = line
+			}
+			fmt.Fprintln(w, strings.Join(parts, gapStr))
+		}
+		if end < len(blocks) {
 			fmt.Fprintln(w)
 		}
 	}
 	return nil
+}
+
+var ansiColorRx = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func visibleWidth(s string) int {
+	if s == "" {
+		return 0
+	}
+	clean := ansiColorRx.ReplaceAllString(s, "")
+	return runewidth.StringWidth(clean)
 }
 
 // styleWithTextColors maps columns.CellStyle to go-pretty text.Colors and returns a formatted Sprintf wrapper.
