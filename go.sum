@@ -17,6 +17,8 @@ github.com/jedib0t/go-pretty/v6 v6.6.8 h1:JnnzQeRz2bACBobIaa/r+nqjvws4yEhcmaZ4n1
 github.com/jedib0t/go-pretty/v6 v6.6.8/go.mod h1:YwC5CE4fJ1HFUDeivSV1r//AmANFHyqczZk+U6BDALU=
 github.com/komsit37/yf-go v0.0.0-20251017084539-72379559587c h1:9dVBythkIrawe8OF2RGIG93MG3HPi0sGlsSJ9G98DOU=
 github.com/komsit37/yf-go v0.0.0-20251017084539-72379559587c/go.mod h1:AAxx2BlTcUxjjI9+ZTAedrehTdCfTSmEQnBXTD809Bo=
+github.com/komsit37/yf-go v0.0.0-20251025053802-3c074de3afe9 h1:85iajgQviAEAalsmUS9+wOX0cgi5E4+rTGw2EVdW08I=
+github.com/komsit37/yf-go v0.0.0-20251025053802-3c074de3afe9/go.mod h1:AAxx2BlTcUxjjI9+ZTAedrehTdCfTSmEQnBXTD809Bo=
 github.com/kr/pretty v0.3.1 h1:flRD4NNwYAUpkphVc1HcthR4KEIFJ65n8Mw5qdRn3LE=
 github.com/kr/pretty v0.3.1/go.mod h1:hoEshYVHaxMs3cyo3Yncou5ZscifuDolrwPKZanG3xk=
 github.com/kr/text v0.2.0 h1:5Nx0Ya0ZqY2ygV366QzturHI13Jq95ApcVaJBhpS+AY=
