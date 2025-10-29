@@ -352,6 +352,8 @@ func main() {
 				rnd = render.NewTableRendererWithClient(client)
 			case "json":
 				rnd = render.NewJSONRenderer()
+			case "syms":
+				rnd = render.NewSymsRenderer()
 			default:
 				return fmt.Errorf("unknown output: %s", flagOutput)
 			}
@@ -509,7 +511,7 @@ func main() {
 
 	rootCmd.Flags().StringVar(&flagSource, "source", "yaml", "data source: yaml|db")
 	rootCmd.Flags().StringVar(&flagDBDSN, "db-dsn", "", "database DSN for db source")
-	rootCmd.Flags().StringVarP(&flagOutput, "output", "o", "table", "output format: table|json")
+	rootCmd.Flags().StringVarP(&flagOutput, "output", "o", "table", "output format: table|json|syms")
 	rootCmd.Flags().BoolVar(&flagNoColor, "no-color", false, "disable color output")
 	rootCmd.Flags().BoolVarP(&flagPretty, "pretty", "p", false, "pretty-print JSON output")
 	rootCmd.Flags().StringVarP(&flagCols, "cols", "c", "", "comma-separated columns to display")
